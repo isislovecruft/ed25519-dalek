@@ -35,7 +35,7 @@ version = "^0.6"
 
 [dev-dependencies]
 rustc-serialize = "0.3"
-sha2 = "^0.5"
+sha2-asm = "^0.1"
 
 [features]
 default = ["std"]

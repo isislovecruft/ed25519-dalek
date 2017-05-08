@@ -22,7 +22,7 @@
 //!
 //! ```
 //! extern crate rand;
-//! extern crate sha2;
+//! extern crate sha2_asm as sha2;
 //! extern crate ed25519_dalek;
 //!
 //! # fn main() {
@@ -41,7 +41,7 @@
 //!
 //! ```
 //! # extern crate rand;
-//! # extern crate sha2;
+//! # extern crate sha2_asm as sha2;
 //! # extern crate ed25519_dalek;
 //! # fn main() {
 //! # use rand::Rng;
@@ -61,7 +61,7 @@
 //!
 //! ```
 //! # extern crate rand;
-//! # extern crate sha2;
+//! # extern crate sha2_asm as sha2;
 //! # extern crate ed25519_dalek;
 //! # fn main() {
 //! # use rand::Rng;
@@ -84,7 +84,7 @@
 //!
 //! ```
 //! # extern crate rand;
-//! # extern crate sha2;
+//! # extern crate sha2_asm as sha2;
 //! # extern crate ed25519_dalek;
 //! # fn main() {
 //! # use rand::Rng;
@@ -124,7 +124,7 @@ extern crate rand;
 extern crate std;
 
 #[cfg(test)]
-extern crate sha2;
+extern crate sha2_asm as sha2;
 
 #[cfg(test)]
 extern crate rustc_serialize;
