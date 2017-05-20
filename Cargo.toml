@@ -12,6 +12,10 @@ categories = ["cryptography", "no-std"]
 description = "Fast and efficient ed25519 signing and verification in pure Rust."
 exclude = [ ".gitignore", "TESTVECTORS", "res/*" ]
 
+[lib]
+name = "ed25519_dalek"
+crate-type = ["cdylib", "rlib", "staticlib"]
+
 [badges]
 travis-ci = { repository = "isislovecruft/ed25519-dalek", branch = "master"}
 
@@ -22,9 +26,17 @@ arrayref = "0.3.3"
 version = "^0.7"
 default-features = false
 
+[dependencies.libc]
+optional = true
+version = "*"
+
 [dependencies.rand]
 optional = true
 version = "^0.3"
+
+[dependencies.sha2]
+optional = true
+version = "^0.5"
 
 [dependencies.digest]
 version = "^0.5"
@@ -42,3 +54,4 @@ default = ["std"]
 std = ["rand", "curve25519-dalek/std"]
 bench = []
 nightly = ["curve25519-dalek/nightly"]
+ffi = ["rand", "sha2", "libc"]

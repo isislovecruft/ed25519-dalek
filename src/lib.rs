@@ -116,6 +116,9 @@ extern crate curve25519_dalek;
 extern crate generic_array;
 extern crate digest;
 
+#[cfg(feature = "ffi")]
+extern crate libc;
+
 #[cfg(feature = "std")]
 extern crate rand;
 
@@ -123,7 +126,7 @@ extern crate rand;
 #[macro_use]
 extern crate std;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "ffi"))]
 extern crate sha2;
 
 #[cfg(test)]
@@ -137,3 +140,6 @@ mod ed25519;
 
 // Export everything public in ed25519.
 pub use ed25519::*;
+
+#[cfg(feature = "ffi")]
+pub mod ffi;

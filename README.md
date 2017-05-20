@@ -139,6 +139,67 @@ to the `Cargo.toml`:
     [features]
     nightly = ["ed25519-dalek/nightly"]
 
+# FFI API
+
+## Installation
+
+To install with a simple Forein Function Interface (FFI) API, do:
+
+    cargo install --features="ffi"
+
+## Headers
+
+For convenience, headers for the FFI API are provided in
+`./examples/ffi/ed25519_dalek.h`, including non-opaque structs for the types:
+
+ * `Keypair`,
+ * `PublicKey`,
+ * `SecretKey`, and
+ * `Signature`
+
+as well as providing declarations for the following functions:
+
+```
+extern ed25519_dalek_keypair_t ed25519_dalek_keypair_generate();
+extern ed25519_dalek_signature_t ed25519_dalek_sign(const ed25519_dalek_secret_key_t* secret_key,
+                                                    const uint8_t* message,
+                                                    const size_t message_len);
+extern uint8_t ed25519_dalek_verify(const ed25519_dalek_public_key_t* public_key,
+                                    const uint8_t* message,
+                                    const size_t message_len,
+                                    const ed25519_dalek_signature_t* signature);
+```
+
+to provide an easy-to-use interface to key generation, signing, and verification.
+
+## Example Usage
+
+    #include <assert.h>
+    #include <stdint.h>
+
+    #include "ed25519_dalek.h"
+
+    void main() {
+      ed25519_dalek_keypair_t   keypair;
+      ed25519_dalek_signature_t signature;
+      uint8_t  good_sig;
+      uint8_t* message;
+      size_t   message_len;
+
+      message = "This is a test of the tsunami alert system. This is just a test.";
+      message_len = sizeof(message);
+
+      keypair   = ed25519_dalek_keypair_generate();
+      signature = ed25519_dalek_sign(&keypair.secret, message, message_len);
+      good_sig  = ed25519_dalek_verify(&keypair.public, message, message_len, &signature);
+
+      assert(good_sig);
+    }
+
+You can test this example by installing with FFI enabled (as above) and then doing:
+
+    cd ./examples/ffi
+    make && ./ed25519_dalek_test
 
 # TODO
 

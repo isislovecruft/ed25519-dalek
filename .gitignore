@@ -11,3 +11,5 @@ Cargo.lock
 *.bak
 
 *.s
+
+examples/ffi/ed25519_dalek_test
