@@ -126,7 +126,7 @@ pub extern fn ed25519_dalek_keypair_generate() -> Keypair {
 /// Given a `secret_key`, sign a `message` in a foreign language.
 pub unsafe extern fn ed25519_dalek_sign(secret_key: *const SecretKey,
                                         message: *const uint8_t,
-                                        message_len: *const size_t) -> Signature {
+                                        message_len: size_t) -> Signature {
     let msg = ptr_to_slice!(message, message_len);
     let sk =  ptr_to_struct!(secret_key);
 
@@ -137,7 +137,7 @@ pub unsafe extern fn ed25519_dalek_sign(secret_key: *const SecretKey,
 /// Given a `public_key`, a `signature`, and a `message`, verify the `signature`.
 pub unsafe extern fn ed25519_dalek_verify(public_key: *const PublicKey,
                                           message: *const uint8_t,
-                                          message_len: *const size_t,
+                                          message_len: size_t,
                                           signature: *const Signature) -> uint8_t {
     let msg = ptr_to_slice!(message, message_len);
     let pk =  ptr_to_struct!(public_key);
