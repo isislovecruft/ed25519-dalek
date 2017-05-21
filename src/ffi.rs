@@ -43,6 +43,7 @@
 //!                                     const uint8_t* message,
 //!                                     const size_t message_len,
 //!                                     const ed25519_dalek_signature_t* signature);
+//! ```
 //!
 //! # Examples
 //!
@@ -123,9 +124,9 @@ pub extern fn ed25519_dalek_keypair_generate() -> Keypair {
 
 #[no_mangle]
 /// Given a `secret_key`, sign a `message` in a foreign language.
-pub extern fn ed25519_dalek_sign(secret_key: *const SecretKey,
-                                 message: *const uint8_t,
-                                 message_len: *const size_t) -> Signature {
+pub unsafe extern fn ed25519_dalek_sign(secret_key: *const SecretKey,
+                                        message: *const uint8_t,
+                                        message_len: *const size_t) -> Signature {
     let msg = ptr_to_slice!(message, message_len);
     let sk =  ptr_to_struct!(secret_key);
 
@@ -134,10 +135,10 @@ pub extern fn ed25519_dalek_sign(secret_key: *const SecretKey,
 
 #[no_mangle]
 /// Given a `public_key`, a `signature`, and a `message`, verify the `signature`.
-pub extern fn ed25519_dalek_verify(public_key: *const PublicKey,
-                                   message: *const uint8_t,
-                                   message_len: *const size_t,
-                                   signature: *const Signature) -> uint8_t {
+pub unsafe extern fn ed25519_dalek_verify(public_key: *const PublicKey,
+                                          message: *const uint8_t,
+                                          message_len: *const size_t,
+                                          signature: *const Signature) -> uint8_t {
     let msg = ptr_to_slice!(message, message_len);
     let pk =  ptr_to_struct!(public_key);
     let sig = ptr_to_struct!(signature);
