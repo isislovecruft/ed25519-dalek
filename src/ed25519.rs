@@ -24,8 +24,8 @@ use digest::FixedOutput;
 use generic_array::typenum::U64;
 
 use curve25519_dalek::constants;
-use curve25519_dalek::decaf::CompressedDecaf;
-use curve25519_dalek::decaf::DecafPoint;
+use curve25519_dalek::ristretto::CompressedRistretto;
+use curve25519_dalek::ristretto::RistrettoPoint;
 use curve25519_dalek::scalar::Scalar;
 
 use subtle::slices_equal;
@@ -224,7 +224,7 @@ impl SecretKey {
 /// An ed25519 public key.
 #[derive(Copy, Clone)]
 #[repr(C)]
-pub struct PublicKey(pub CompressedDecaf);
+pub struct PublicKey(pub CompressedRistretto);
 
 impl Debug for PublicKey {
     fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
@@ -250,7 +250,7 @@ impl PublicKey {
     /// # Warning
     ///
     /// The caller is responsible for ensuring that the bytes passed into this
-    /// method actually represent a `curve25519_dalek::curve::CompressedDecaf`
+    /// method actually represent a `curve25519_dalek::curve::CompressedRistretto`
     /// and that said compressed point is actually a point on the curve.
     ///
     /// # Example
@@ -274,12 +274,12 @@ impl PublicKey {
     /// A `PublicKey`.
     #[inline]
     pub fn from_bytes(bytes: &[u8]) -> PublicKey {
-        PublicKey(CompressedDecaf(*array_ref!(bytes, 0, 32)))
+        PublicKey(CompressedRistretto(*array_ref!(bytes, 0, 32)))
     }
 
     /// Convert this public key to its underlying extended twisted Edwards coordinate.
     #[inline]
-    fn decompress(&self) -> Option<DecafPoint> {
+    fn decompress(&self) -> Option<RistrettoPoint> {
         self.0.decompress()
     }
 
@@ -288,7 +288,7 @@ impl PublicKey {
     #[allow(unused_assignments)]
     pub fn from_secret<D>(secret_key: &SecretKey) -> PublicKey
             where D: Digest<OutputSize = U64> + Default {
-        let pk: DecafPoint = &Scalar(secret_key.0) * &constants::DECAF_ED25519_BASEPOINT;
+        let pk: RistrettoPoint = &Scalar(secret_key.0) * &constants::RISTRETTO_ED25519_BASEPOINT;
 
         PublicKey(pk.compress())
     }
@@ -303,9 +303,9 @@ impl PublicKey {
     where D: Digest<OutputSize = U64> + Default {
 
         let mut h: D = D::default();
-        let a: DecafPoint;
-        let ao:  Option<DecafPoint>;
-        //let r: DecafPoint;
+        let a: RistrettoPoint;
+        let ao:  Option<RistrettoPoint>;
+        //let r: RistrettoPoint;
         let k: Scalar;
 
         ao = self.decompress();
@@ -316,10 +316,10 @@ impl PublicKey {
         }
 
         let s: Scalar = Scalar(*array_ref!(&signature.0, 32, 32));
-        let t: CompressedDecaf = CompressedDecaf(*array_ref!(&signature.0,  0, 32));
+        let t: CompressedRistretto = CompressedRistretto(*array_ref!(&signature.0,  0, 32));
 
-        let ro: Option<DecafPoint> = t.decompress();
-        let r_prime: DecafPoint;
+        let ro: Option<RistrettoPoint> = t.decompress();
+        let r_prime: RistrettoPoint;
 
         if ro.is_some() {
             r_prime = ro.unwrap();
@@ -332,7 +332,7 @@ impl PublicKey {
         h.input(&message);
 
         k = Scalar::from_hash(h);
-        //r = &(&k * &a) + &(&s * &constants::DECAF_ED25519_BASEPOINT);
+        //r = &(&k * &a) + &(&s * &constants::RISTRETTO_ED25519_BASEPOINT);
 
         //if slices_equal(&t.to_bytes(), &r.compress().to_bytes()) == 1 {
         //    return true
@@ -340,7 +340,7 @@ impl PublicKey {
         //    return false
         //}
 
-        if &s * &constants::DECAF_ED25519_BASEPOINT == &r_prime + &(&k * &a) {
+        if &s * &constants::RISTRETTO_ED25519_BASEPOINT == &r_prime + &(&k * &a) {
             return true;
         } else {
             return false;
@@ -449,16 +449,16 @@ impl Keypair {
         let mut signature_bytes: [u8; 64] = [0u8; SIGNATURE_LENGTH];
         let mesg_digest: Scalar;
         let k: Scalar;
-        let r: DecafPoint;
+        let r: RistrettoPoint;
         let s: Scalar;
-        let t: CompressedDecaf;
+        let t: CompressedRistretto;
 
         h.input(self.public.as_bytes());
         h.input(&message);
 
         mesg_digest = Scalar::from_hash(h);
 
-        r = &mesg_digest * &constants::DECAF_ED25519_BASEPOINT;
+        r = &mesg_digest * &constants::RISTRETTO_ED25519_BASEPOINT;
         t = r.compress();
 
         h = D::default();
@@ -508,7 +508,7 @@ mod test {
     use std::fs::File;
     use std::string::String;
     use std::vec::Vec;
-    use curve25519_dalek::decaf::DecafPoint;
+    use curve25519_dalek::ristretto::RistrettoPoint;
     use rand::OsRng;
     use rustc_serialize::hex::FromHex;
     use sha2::Sha512;
@@ -518,8 +518,8 @@ mod test {
     fn unmarshal_marshal() {  // TestUnmarshalMarshal
         let mut cspring: OsRng;
         let mut keypair: Keypair;
-        let mut x: Option<DecafPoint>;
-        let a: DecafPoint;
+        let mut x: Option<RistrettoPoint>;
+        let a: RistrettoPoint;
         let public: PublicKey;
 
         cspring = OsRng::new().unwrap();

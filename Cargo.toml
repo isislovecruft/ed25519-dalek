@@ -19,10 +19,10 @@ travis-ci = { repository = "isislovecruft/ed25519-dalek", branch = "master"}
 arrayref = "0.3.3"
 
 [dependencies.curve25519-dalek]
-version = "^0.10"
+version = "^0.9"
 default-features = false
 git = "https://github.com/isislovecruft/curve25519-dalek"
-branch = "develop"
+branch = "feature/ristretto"
 features = ["yolocrypto", "nightly"]
 
 [dependencies.subtle]
