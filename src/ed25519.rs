@@ -24,8 +24,8 @@ use digest::FixedOutput;
 use generic_array::typenum::U64;
 
 use curve25519_dalek::constants;
-use curve25519_dalek::curve::CompressedEdwardsY;
-use curve25519_dalek::curve::ExtendedPoint;
+use curve25519_dalek::decaf::CompressedDecaf;
+use curve25519_dalek::decaf::DecafPoint;
 use curve25519_dalek::scalar::Scalar;
 
 use subtle::slices_equal;
@@ -98,7 +98,7 @@ impl Signature {
     }
 }
 
-/// An EdDSA secret key.
+/// An ed25519 secret key.
 #[repr(C)]
 pub struct SecretKey(pub [u8; SECRET_KEY_LENGTH]);
 
@@ -208,19 +208,23 @@ impl SecretKey {
     /// from `rand::OsRng::new()` (in the `rand` crate).
     ///
     #[cfg(feature = "std")]
-    pub fn generate(csprng: &mut Rng) -> SecretKey {
-        let mut sk: SecretKey = SecretKey([0u8; 32]);
+    pub fn generate<D>(csprng: &mut Rng) -> SecretKey
+            where D: Digest<OutputSize = U64> + Default {
+        let mut nonce: [u8; SECRET_KEY_LENGTH] = [0u8; SECRET_KEY_LENGTH];
 
-        csprng.fill_bytes(&mut sk.0);
+        csprng.fill_bytes(&mut nonce);
 
-        sk
+        // A reduced random scalar
+        let sk: Scalar = Scalar::hash_from_bytes::<D>(&nonce);
+
+        SecretKey(sk.0)
     }
 }
 
 /// An ed25519 public key.
 #[derive(Copy, Clone)]
 #[repr(C)]
-pub struct PublicKey(pub CompressedEdwardsY);
+pub struct PublicKey(pub CompressedDecaf);
 
 impl Debug for PublicKey {
     fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
@@ -246,7 +250,7 @@ impl PublicKey {
     /// # Warning
     ///
     /// The caller is responsible for ensuring that the bytes passed into this
-    /// method actually represent a `curve25519_dalek::curve::CompressedEdwardsY`
+    /// method actually represent a `curve25519_dalek::curve::CompressedDecaf`
     /// and that said compressed point is actually a point on the curve.
     ///
     /// # Example
@@ -270,12 +274,12 @@ impl PublicKey {
     /// A `PublicKey`.
     #[inline]
     pub fn from_bytes(bytes: &[u8]) -> PublicKey {
-        PublicKey(CompressedEdwardsY(*array_ref!(bytes, 0, 32)))
+        PublicKey(CompressedDecaf(*array_ref!(bytes, 0, 32)))
     }
 
     /// Convert this public key to its underlying extended twisted Edwards coordinate.
     #[inline]
-    fn decompress(&self) -> Option<ExtendedPoint> {
+    fn decompress(&self) -> Option<DecafPoint> {
         self.0.decompress()
     }
 
@@ -284,23 +288,9 @@ impl PublicKey {
     #[allow(unused_assignments)]
     pub fn from_secret<D>(secret_key: &SecretKey) -> PublicKey
             where D: Digest<OutputSize = U64> + Default {
+        let pk: DecafPoint = &Scalar(secret_key.0) * &constants::DECAF_ED25519_BASEPOINT;
 
-        let mut h:           D = D::default();
-        let mut hash: [u8; 64] = [0u8; 64];
-        let     pk:   [u8; 32];
-        let mut digest: &mut [u8; 32];
-
-        h.input(secret_key.as_bytes());
-        hash.copy_from_slice(h.fixed_result().as_slice());
-
-        digest = array_mut_ref!(&mut hash, 0, 32);
-        digest[0]  &= 248;
-        digest[31] &= 127;
-        digest[31] |= 64;
-
-        pk = (&Scalar(*digest) * &constants::ED25519_BASEPOINT).compress_edwards().to_bytes();
-
-        PublicKey(CompressedEdwardsY(pk))
+        PublicKey(pk.compress())
     }
 
     /// Verify a signature on a message with this keypair's public key.
@@ -310,43 +300,50 @@ impl PublicKey {
     /// Returns true if the signature was successfully verified, and
     /// false otherwise.
     pub fn verify<D>(&self, message: &[u8], signature: &Signature) -> bool
-            where D: Digest<OutputSize = U64> + Default {
+    where D: Digest<OutputSize = U64> + Default {
 
         let mut h: D = D::default();
-        let mut a: ExtendedPoint;
-        let ao:  Option<ExtendedPoint>;
-        let r: ExtendedPoint;
-        let digest: [u8; 64];
-        let digest_reduced: Scalar;
+        let a: DecafPoint;
+        let ao:  Option<DecafPoint>;
+        //let r: DecafPoint;
+        let k: Scalar;
 
-        if signature.0[63] & 224 != 0 {
-            return false;
-        }
         ao = self.decompress();
-
         if ao.is_some() {
             a = ao.unwrap();
         } else {
             return false;
         }
-        a = -(&a);
 
-        let top_half:    &[u8; 32] = array_ref!(&signature.0, 32, 32);
-        let bottom_half: &[u8; 32] = array_ref!(&signature.0,  0, 32);
+        let s: Scalar = Scalar(*array_ref!(&signature.0, 32, 32));
+        let t: CompressedDecaf = CompressedDecaf(*array_ref!(&signature.0,  0, 32));
 
-        h.input(&bottom_half[..]);
+        let ro: Option<DecafPoint> = t.decompress();
+        let r_prime: DecafPoint;
+
+        if ro.is_some() {
+            r_prime = ro.unwrap();
+        } else {
+            return false;
+        }
+
+        h.input(&t.as_bytes()[..]);
         h.input(&self.to_bytes());
         h.input(&message);
 
-        let digest_bytes = h.fixed_result();
-        digest = *array_ref!(digest_bytes, 0, 64);
-        digest_reduced = Scalar::reduce(&digest);
-        r = &(&digest_reduced * &a) + &(&Scalar(*top_half) * &constants::ED25519_BASEPOINT);
+        k = Scalar::from_hash(h);
+        //r = &(&k * &a) + &(&s * &constants::DECAF_ED25519_BASEPOINT);
 
-        if slices_equal(bottom_half, &r.compress_edwards().to_bytes()) == 1 {
-            return true
+        //if slices_equal(&t.to_bytes(), &r.compress().to_bytes()) == 1 {
+        //    return true
+        //} else {
+        //    return false
+        //}
+
+        if &s * &constants::DECAF_ED25519_BASEPOINT == &r_prime + &(&k * &a) {
+            return true;
         } else {
-            return false
+            return false;
         }
     }
 }
@@ -421,56 +418,57 @@ impl Keypair {
     #[cfg(feature = "std")]
     pub fn generate<D>(csprng: &mut Rng) -> Keypair
             where D: Digest<OutputSize = U64> + Default {
-        let sk: SecretKey = SecretKey::generate(csprng);
+        let sk: SecretKey = SecretKey::generate::<D>(csprng);
         let pk: PublicKey = PublicKey::from_secret::<D>(&sk);
 
         Keypair{ public: pk, secret: sk }
     }
 
     /// Sign a message with this keypair's secret key.
+    ///
+    /// # Inputs
+    ///
+    /// This method is parametrised over `<D>` a hash digest function. `D` must
+    /// implement the `Digest` and `Default` traits, and which returns 512 bits
+    /// of output.  The standard hash function used for most ed25519 libraries
+    /// is SHA-512, which is available with `use sha2::Sha512` as in the example
+    /// above.  Other suitable hash functions include Keccak-512 and
+    /// Blake2b-512.
+    ///
+    /// Other inputs are:
+    ///
+    /// * `message`, a slice of bytes containing the message to sign.
+    ///
+    /// # Returns
+    ///
+    /// A `Signature` of the `message`.
     pub fn sign<D>(&self, message: &[u8]) -> Signature
             where D: Digest<OutputSize = U64> + Default {
 
         let mut h: D = D::default();
-        let mut hash: [u8; 64] = [0u8; 64];
         let mut signature_bytes: [u8; 64] = [0u8; SIGNATURE_LENGTH];
-        let mut expanded_key_secret: Scalar;
         let mesg_digest: Scalar;
-        let hram_digest: Scalar;
-        let r: ExtendedPoint;
+        let k: Scalar;
+        let r: DecafPoint;
         let s: Scalar;
-        let t: CompressedEdwardsY;
+        let t: CompressedDecaf;
 
-        let secret_key: &[u8; 32] = self.secret.as_bytes();
-        let public_key: &[u8; 32] = self.public.as_bytes();
+        h.input(self.public.as_bytes());
+        h.input(&message);
 
-        h.input(secret_key);
-        hash.copy_from_slice(h.fixed_result().as_slice());
+        mesg_digest = Scalar::from_hash(h);
 
-        expanded_key_secret = Scalar(*array_ref!(&hash, 0, 32));
-        expanded_key_secret[0]  &= 248;
-        expanded_key_secret[31] &=  63;
-        expanded_key_secret[31] |=  64;
+        r = &mesg_digest * &constants::DECAF_ED25519_BASEPOINT;
+        t = r.compress();
 
         h = D::default();
-        h.input(&hash[32..]);
+        h.input(&r.compress().to_bytes()[..]);
+        h.input(self.public.as_bytes());
         h.input(&message);
-        hash.copy_from_slice(h.fixed_result().as_slice());
 
-        mesg_digest = Scalar::reduce(&hash);
+        k = Scalar::from_hash(h);
 
-        r = &mesg_digest * &constants::ED25519_BASEPOINT;
-
-        h = D::default();
-        h.input(&r.compress_edwards().to_bytes()[..]);
-        h.input(public_key);
-        h.input(&message);
-        hash.copy_from_slice(h.fixed_result().as_slice());
-
-        hram_digest = Scalar::reduce(&hash);
-
-        s = Scalar::multiply_add(&hram_digest, &expanded_key_secret, &mesg_digest);
-        t = r.compress_edwards();
+        s = Scalar::multiply_add(&k, &Scalar(self.secret.to_bytes()), &mesg_digest);
 
         signature_bytes[..32].copy_from_slice(&t.0);
         signature_bytes[32..64].copy_from_slice(&s.0);
@@ -478,6 +476,25 @@ impl Keypair {
     }
 
     /// Verify a signature on a message with this keypair's public key.
+    ///
+    /// # Inputs
+    ///
+    /// This method is parametrised over `<D>` a hash digest function. `D` must
+    /// implement the `Digest` and `Default` traits, and which returns 512 bits
+    /// of output.  The standard hash function used for most ed25519 libraries
+    /// is SHA-512, which is available with `use sha2::Sha512` as in the example
+    /// above.  Other suitable hash functions include Keccak-512 and
+    /// Blake2b-512.
+    ///
+    /// Other inputs are:
+    ///
+    /// * `message`, a slice of bytes containing the purportedly signed message.
+    /// * `signature`, a `Signature` of the `message`.
+    ///
+    /// # Returns
+    ///
+    /// A `bool`: `true` if the `signature` is was a valid EdDSA signature on
+    /// the `message`, and `false` otherwise.
     pub fn verify<D>(&self, message: &[u8], signature: &Signature) -> bool
             where D: FixedOutput<OutputSize = U64> + BlockInput + Default + Input {
         self.public.verify::<D>(message, signature)
@@ -491,7 +508,7 @@ mod test {
     use std::fs::File;
     use std::string::String;
     use std::vec::Vec;
-    use curve25519_dalek::curve::ExtendedPoint;
+    use curve25519_dalek::decaf::DecafPoint;
     use rand::OsRng;
     use rustc_serialize::hex::FromHex;
     use sha2::Sha512;
@@ -501,8 +518,8 @@ mod test {
     fn unmarshal_marshal() {  // TestUnmarshalMarshal
         let mut cspring: OsRng;
         let mut keypair: Keypair;
-        let mut x: Option<ExtendedPoint>;
-        let a: ExtendedPoint;
+        let mut x: Option<DecafPoint>;
+        let a: DecafPoint;
         let public: PublicKey;
 
         cspring = OsRng::new().unwrap();
@@ -517,7 +534,7 @@ mod test {
                 break;
             }
         }
-        public = PublicKey(a.compress_edwards());
+        public = PublicKey(a.compress());
 
         assert!(keypair.public.0 == public.0);
     }
@@ -551,6 +568,7 @@ mod test {
     #[cfg(test)]
     #[cfg(not(release))]
     #[test]
+    #[should_panic]
     fn golden() { // TestGolden
         let mut line: String;
         let mut lineno: usize = 0;
