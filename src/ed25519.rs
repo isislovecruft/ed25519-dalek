@@ -998,6 +998,71 @@ pub fn verify_batch<D>(messages: &[&[u8]],
     }
 }
 
+/// Verify a batch of signatures created with the same key.
+#[cfg(any(feature = "alloc", feature = "std"))]
+#[allow(non_snake_case)]
+pub fn verify_batch_from_same_key<D>(messages: &[&[u8]],
+                                     signatures: &[Signature],
+                                     public_key: &PublicKey) -> Result<(), SignatureError>
+    where D: Digest<OutputSize = U64> + Default
+{
+    assert!(signatures.len() == messages.len(), "The number of messages and signatures must be equal.");
+
+    #[cfg(feature = "alloc")]
+    use alloc::vec::Vec;
+    #[cfg(feature = "std")]
+    use std::vec::Vec;
+
+    use core::iter::once;
+    use rand::thread_rng;
+
+    use curve25519_dalek::traits::IsIdentity;
+    use curve25519_dalek::traits::VartimeMultiscalarMul;
+
+    // Select a random 128-bit scalar for each signature.
+    let zs: Vec<Scalar> = signatures
+        .iter()
+        .map(|_| Scalar::from(thread_rng().gen::<u128>()))
+        .collect();
+
+    // Compute the basepoint coefficient, ∑ s[i]z[i] (mod l)
+    let B_coefficient: Scalar = signatures
+        .iter()
+        .map(|sig| sig.s)
+        .zip(zs.iter())
+        .map(|(s, z)| z * s)
+        .sum();
+
+    // Compute H(R || A || M) for each (signature, public_key, message) triplet
+    let hrams = (0..signatures.len()).map(|i| {
+        let mut h: D = D::default();
+        h.input(signatures[i].R.as_bytes());
+        h.input(public_key.as_bytes());
+        h.input(&messages[i]);
+        Scalar::from_hash(h)
+    });
+
+    // Multiply each H(R || A || M) by the random value
+    let zhrams = hrams.zip(zs.iter()).map(|(hram, z)| hram * z);
+
+    let Rs = signatures.iter().map(|sig| sig.R.decompress());
+    let A  = public_key.0.decompress();
+    let As = (0..signatures.len()).map(|_| A);
+    let B = once(Some(constants::ED25519_BASEPOINT_POINT));
+
+    // Compute (-∑ z[i]s[i] (mod l)) B + ∑ z[i]R[i] + ∑ (z[i]H(R||A||M)[i] (mod l)) A[i] = 0
+    let id = EdwardsPoint::optional_multiscalar_mul(
+        once(-B_coefficient).chain(zs.iter().cloned()).chain(zhrams),
+        B.chain(Rs).chain(As),
+    ).ok_or_else(|| SignatureError(InternalError::VerifyError))?;
+
+    if id.is_identity() {
+        Ok(())
+    } else {
+        Err(SignatureError(InternalError::VerifyError))
+    }
+}
+
 #[cfg(feature = "serde")]
 impl Serialize for PublicKey {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {

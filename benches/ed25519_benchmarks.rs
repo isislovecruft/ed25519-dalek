@@ -22,6 +22,7 @@ mod ed25519_benches {
     use ed25519_dalek::PublicKey;
     use ed25519_dalek::Signature;
     use ed25519_dalek::verify_batch;
+    use ed25519_dalek::verify_batch_from_same_key;
     use rand::thread_rng;
     use rand::ThreadRng;
     use sha2::Sha512;
@@ -77,6 +78,47 @@ mod ed25519_benches {
         );
     }
 
+    // This bench uses the verify_batch function with the same key.
+    fn verify_batch_signatures_with_same_key(c: &mut Criterion) {
+        static BATCH_SIZES: [usize; 8] = [4, 8, 16, 32, 64, 96, 128, 256];
+
+        c.bench_function_over_inputs(
+            "Ed25519 batch signature verification with the same key",
+            |b, &&size| {
+                let mut csprng: ThreadRng = thread_rng();
+                let keypair: Keypair = Keypair::generate::<Sha512, _>(&mut csprng);
+                let msg: &[u8] = b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+                let messages: Vec<&[u8]> = (0..size).map(|_| msg).collect();
+                let signature: Signature = keypair.sign::<Sha512>(&msg);
+                let signatures:  Vec<Signature> = (0..size).map(|_| signature).collect();
+                let public_keys: Vec<PublicKey> = (0..size).map(|_| keypair.public).collect();
+
+                b.iter(|| verify_batch::<Sha512>(&messages[..], &signatures[..], &public_keys[..]));
+            },
+            &BATCH_SIZES,
+        );
+    }
+
+    // This bench uses the verify_batch_from_same_key function with the same key.
+    fn verify_batch_signatures_from_same_key(c: &mut Criterion) {
+        static BATCH_SIZES: [usize; 8] = [4, 8, 16, 32, 64, 96, 128, 256];
+
+        c.bench_function_over_inputs(
+            "Ed25519 batch signature verification with the same key cached",
+            |b, &&size| {
+                let mut csprng: ThreadRng = thread_rng();
+                let keypair: Keypair = Keypair::generate::<Sha512, _>(&mut csprng);
+                let msg: &[u8] = b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+                let messages: Vec<&[u8]> = (0..size).map(|_| msg).collect();
+                let signature: Signature = keypair.sign::<Sha512>(&msg);
+                let signatures:  Vec<Signature> = (0..size).map(|_| signature).collect();
+
+                b.iter(|| verify_batch_from_same_key::<Sha512>(&messages[..], &signatures[..], &keypair.public));
+            },
+            &BATCH_SIZES,
+        );
+    }
+
     fn key_generation(c: &mut Criterion) {
         let mut csprng: ThreadRng = thread_rng();
 
@@ -93,6 +135,8 @@ mod ed25519_benches {
             sign_expanded_key,
             verify,
             verify_batch_signatures,
+            verify_batch_signatures_with_same_key,
+            verify_batch_signatures_from_same_key,
             key_generation,
     }
 }
