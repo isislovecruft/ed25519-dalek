@@ -9,6 +9,7 @@
 
 //! ed25519 keypairs and batch verification.
 
+use core::borrow::Borrow;
 use core::default::Default;
 
 use rand::CryptoRng;
@@ -37,6 +38,17 @@ pub use crate::errors::*;
 pub use crate::public::*;
 pub use crate::secret::*;
 pub use crate::signature::*;
+
+    #[cfg(feature = "alloc")]
+    use alloc::vec::Vec;
+
+    use core::iter::once;
+    use core::iter::Iterator;
+
+    use rand::thread_rng;
+
+    use curve25519_dalek::traits::IsIdentity;
+    use curve25519_dalek::traits::VartimeMultiscalarMul;
 
 /// Verify a batch of `signatures` on `messages` with their respective `public_keys`.
 ///
@@ -86,61 +98,85 @@ pub use crate::signature::*;
 /// ```
 #[cfg(any(feature = "alloc", feature = "std"))]
 #[allow(non_snake_case)]
-pub fn verify_batch(
-    messages: &[&[u8]],
-    signatures: &[Signature],
-    public_keys: &[PublicKey],
+pub fn verify_batch<'message, M, S, P, Z>(
+    messages: M,
+    signatures: S,
+    public_keys: P,
 ) -> Result<(), SignatureError>
+where
+    M: IntoIterator<Item = &'message [u8]>,
+    S: IntoIterator,
+    S::Item: Borrow<Signature>,
+    P: IntoIterator,
+    P::Item: Borrow<PublicKey>,
+    Z: IntoIterator<Item = Scalar> + Extend<Scalar> + Default,
 {
     const ASSERT_MESSAGE: &'static [u8] = b"The number of messages, signatures, and public keys must be equal.";
-    assert!(signatures.len()  == messages.len(),    ASSERT_MESSAGE);
-    assert!(signatures.len()  == public_keys.len(), ASSERT_MESSAGE);
-    assert!(public_keys.len() == messages.len(),    ASSERT_MESSAGE);
+
+    let messages = messages.into_iter();
+    let signatures = signatures.into_iter();
+    let public_keys = public_keys.into_iter();
+
+    let number_of_messages    = messages.size_hint();
+    let number_of_signatures  = signatures.size_hint();
+    let number_of_public_keys = public_keys.size_hint();
+
+    assert!(number_of_signatures  == number_of_messages,    ASSERT_MESSAGE);
+    assert!(number_of_signatures  == number_of_public_keys, ASSERT_MESSAGE);
+    assert!(number_of_public_keys == number_of_messages,    ASSERT_MESSAGE);
  
-    #[cfg(feature = "alloc")]
-    use alloc::vec::Vec;
-    #[cfg(feature = "std")]
-    use std::vec::Vec;
-
-    use core::iter::once;
-    use rand::thread_rng;
-
-    use curve25519_dalek::traits::IsIdentity;
-    use curve25519_dalek::traits::VartimeMultiscalarMul;
+    use core::iter::repeat_with;
 
     // Select a random 128-bit scalar for each signature.
-    let zs: Vec<Scalar> = signatures
-        .iter()
-        .map(|_| Scalar::from(thread_rng().gen::<u128>()))
-        .collect();
+    let zs = repeat_with(|| Scalar::from(thread_rng().gen::<u128>())).take(number_of_signatures.0);
 
-    // Compute the basepoint coefficient, ∑ s[i]z[i] (mod l)
-    let B_coefficient: Scalar = signatures
-        .iter()
-        .map(|sig| sig.s)
-        .zip(zs.iter())
-        .map(|(s, z)| z * s)
-        .sum();
+    use std::vec::Vec;
+
+    let mut Rs: Vec<Option<EdwardsPoint>> = Vec::with_capacity(number_of_signatures.0);
 
     // Compute H(R || A || M) for each (signature, public_key, message) triplet
-    let hrams = (0..signatures.len()).map(|i| {
-        let mut h: Sha512 = Sha512::default();
-        h.input(signatures[i].R.as_bytes());
-        h.input(public_keys[i].as_bytes());
-        h.input(&messages[i]);
-        Scalar::from_hash(h)
-    });
+    // and then multiply each by their respective nonce, z[i], to get
+    // zH(R || A || M).
+    //
+    // At the same time, we also begin the computation of the basepoint
+    // coefficient, ∑ s[i]z[i] (mod l).
+    let (zhrams, szs): (Vec<Scalar>, Vec<Scalar>) = signatures
+        .zip(public_keys)
+        .zip(messages)
+        .zip(zs)
+        .map(| (((signature, A), M), z) | {
+            let mut h: Sha512 = Sha512::default();
+
+            h.input(signature.borrow().R.as_bytes());
+            h.input(A.borrow().as_bytes());
+            h.input(M.borrow());
+
+            Rs.push(signature.borrow().R.decompress());
+
+            // (zH(R||A||M), ∑ sz)
+            (z * Scalar::from_hash(h), z * signature.borrow().s)
+    }).unzip();
+
+    // Compute the summation for the basepoint coefficient.
+    let basepoint_coefficient: Scalar = szs.into_iter().sum();
+
+    // let hrams = (0..number_of_signatures.0).map(|i| {
+    //     let mut h: Sha512 = Sha512::default();
+    //     h.input(signatures.nth(i).unwrap().borrow().R.as_bytes());
+    //     h.input(public_keys.nth(i).unwrap().borrow().as_bytes());
+    //     h.input(messages.nth(i).unwrap().borrow());
+    //     Scalar::from_hash(h)
+    // });
 
     // Multiply each H(R || A || M) by the random value
-    let zhrams = hrams.zip(zs.iter()).map(|(hram, z)| hram * z);
+    // let zhrams = hrams.zip(zs.iter()).map(|(hram, z)| hram * z);
 
-    let Rs = signatures.iter().map(|sig| sig.R.decompress());
-    let As = public_keys.iter().map(|pk| Some(pk.1));
+    let As = public_keys.map(|pk| Some(pk.borrow().1));
     let B = once(Some(constants::ED25519_BASEPOINT_POINT));
 
     // Compute (-∑ z[i]s[i] (mod l)) B + ∑ z[i]R[i] + ∑ (z[i]H(R||A||M)[i] (mod l)) A[i] = 0
     let id = EdwardsPoint::optional_multiscalar_mul(
-        once(-B_coefficient).chain(zs.iter().cloned()).chain(zhrams),
+        once(-basepoint_coefficient).chain(zs).chain(zhrams),
         B.chain(Rs).chain(As),
     ).ok_or_else(|| SignatureError(InternalError::VerifyError))?;
 
