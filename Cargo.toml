@@ -49,6 +49,9 @@ default-features = false
 [dependencies.clear_on_drop]
 version = "0.2"
 
+[dependencies.signature]
+version = "0.2"
+
 [dev-dependencies]
 hex = "^0.3"
 bincode = "^0.9"

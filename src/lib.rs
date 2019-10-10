@@ -263,6 +263,7 @@ extern crate rand;
 extern crate rand_core;
 #[cfg(feature = "serde")]
 extern crate serde;
+extern crate signature;
 extern crate sha2;
 
 mod constants;
@@ -271,6 +272,7 @@ mod errors;
 mod public;
 mod secret;
 mod signature;
+mod traits;
 
 // Export everything public in ed25519.
 pub use crate::ed25519::*;
