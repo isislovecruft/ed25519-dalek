@@ -18,7 +18,7 @@ travis-ci = { repository = "dalek-cryptography/ed25519-dalek", branch = "master"
 
 [dependencies]
 clear_on_drop = { version = "0.2" }
-curve25519-dalek = { version = "1", default-features = false }
+curve25519-dalek = { version = "2.0.0-alpha.1", default-features = false }
 rand = { version = "0.7", default-features = false, optional = true }
 serde = { version = "1.0", optional = true }
 sha2 = { version = "0.8", default-features = false }
@@ -45,7 +45,10 @@ batch = ["rand"]
 asm = ["sha2/asm"]
 # This features turns off stricter checking for scalar malleability in signatures
 legacy_compatibility = []
-yolocrypto = ["curve25519-dalek/yolocrypto"]
+# This feature enables aggregatable signatures
+aggregate = []
 u64_backend = ["curve25519-dalek/u64_backend"]
 u32_backend = ["curve25519-dalek/u32_backend"]
+simd_backend = ["curve25519-dalek/simd_backend"]
+# Deprecated, use simd-backend instead
 avx2_backend = ["curve25519-dalek/avx2_backend"]
