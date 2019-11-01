@@ -247,6 +247,8 @@ extern crate rand;
 extern crate serde;
 extern crate sha2;
 
+#[cfg(feature = "aggregate")]
+mod aggregate;
 mod constants;
 mod ed25519;
 mod errors;
@@ -256,3 +258,7 @@ mod signature;
 
 // Export everything public in ed25519.
 pub use crate::ed25519::*;
+
+// If the "aggregate" feature was enabled, also export everything public in the
+// aggregate module.
+pub use crate::aggregate::*;
