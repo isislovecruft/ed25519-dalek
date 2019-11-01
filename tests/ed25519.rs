@@ -211,6 +211,120 @@ mod integrations {
 
         assert!(public_from_secret == public_from_expanded_secret);
     }
+
+    #[cfg(feature = "batch")]
+    #[test]
+    fn verify_batch_malleability_torsion_component() {
+        use curve25519_dalek::constants::EIGHT_TORSION;
+        use curve25519_dalek::edwards::CompressedEdwardsY;
+        use rand::rngs::OsRng;
+
+        let mut csprng = OsRng;
+        let keypair = Keypair::generate(&mut csprng);
+        let msg = b"testing 1 2 3";
+
+        // Any of E[8], except for the identity element, if added to the public
+        // key and the R portion of the signature, will produce another "valid"
+        // signature.
+        let torsion_component = EIGHT_TORSION[1];
+
+        // Make the same public key with added torsion component.
+        let pk_altered = keypair.public.to_bytes();
+        let pk_altered_point = CompressedEdwardsY(pk_altered).decompress().unwrap() + torsion_component;
+        let pk_malicious = PublicKey::from_bytes(&pk_altered_point.compress().to_bytes()).unwrap();
+
+        // Make a completely unrelated, honest signer.
+        let third_party_keypair = Keypair::generate(&mut csprng);
+        let third_party_sig = third_party_keypair.sign(&msg[..]);
+
+        // Sign the message with the untampered-with keypair.
+        let ok_sig = keypair.sign(&msg[..]);
+
+        // Extract R from the signature made with the untampered-with keypair,
+        // and add the same small torsion component to it as we did to the
+        // tampered public key, and use the tampered R to create a malicious
+        // additional signature.
+        let mut ok_sig_r = [0u8; 32];
+        ok_sig_r.copy_from_slice(&ok_sig.to_bytes()[..32]);
+
+        let altered_sig_r = CompressedEdwardsY(ok_sig_r).decompress().unwrap() + torsion_component;
+        let mut altered_sig_bytes = [0u8; 64];
+        altered_sig_bytes[..32].copy_from_slice(altered_sig_r.compress().as_bytes());
+        altered_sig_bytes[32..].copy_from_slice(&ok_sig.to_bytes()[32..]);
+        let bad_sig = Signature::from_bytes(&altered_sig_bytes).unwrap();
+
+        // The malicious signature will should not verify with the usual method:
+        let single_res = pk_malicious.verify(&msg[..], &bad_sig);
+        assert!(single_res.is_err());
+
+        // It also should not verify with the strict checks:
+        let strict_res = pk_malicious.verify_strict(&msg[..], &bad_sig);
+        assert!(strict_res.is_err());
+
+        let batch_res = verify_batch(&[&msg[..], &msg[..], &msg[..]],
+                                     &[ok_sig, bad_sig, third_party_sig],
+                                     &[keypair.public, pk_malicious, third_party_keypair.public]);
+
+        // A set of malicious signatures constructed through an existing (sig,
+        // msg, pk) triplet via adding small torsion components to the R portion
+        // of the signature and the public key should result in an error.
+        assert!(batch_res.is_err());
+    }
+
+    #[cfg(feature = "batch")]
+    #[test]
+    fn verify_batch_malleability_negation() {
+        use curve25519_dalek::edwards::CompressedEdwardsY;
+        use curve25519_dalek::scalar::Scalar;
+        use rand::rngs::OsRng;
+
+        let mut csprng = OsRng;
+        let keypair = Keypair::generate(&mut csprng);
+        let msg = b"testing 1 2 3";
+
+        // Make the same public key but negated.
+        let pk_altered = keypair.public.to_bytes();
+        let pk_altered_point = -CompressedEdwardsY(pk_altered).decompress().unwrap();
+        let pk_malicious = PublicKey::from_bytes(&pk_altered_point.compress().to_bytes()).unwrap();
+
+        // Make a completely unrelated, honest signer.
+        let third_party_keypair = Keypair::generate(&mut csprng);
+        let third_party_sig = third_party_keypair.sign(&msg[..]);
+
+        // Sign the message with the untampered-with keypair.
+        let ok_sig = keypair.sign(&msg[..]);
+
+        // Extract s from the signature made with the untampered-with keypair,
+        // negate it, and use the tampered s to create a malicious additional
+        // signature.
+        let mut ok_sig_s = [0u8; 32];
+        ok_sig_s.copy_from_slice(&ok_sig.to_bytes()[32..]);
+
+        let altered_sig_s = -Scalar::from_bits(ok_sig_s);
+        let mut altered_sig_bytes = [0u8; 64];
+        altered_sig_bytes[..32].copy_from_slice(altered_sig_s.as_bytes());
+        altered_sig_bytes[32..].copy_from_slice(&ok_sig.to_bytes()[32..]);
+        let bad_sig = Signature::from_bytes(&altered_sig_bytes).unwrap();
+
+        // The malicious signature will not verify with the usual method:
+        let single_res = pk_malicious.verify(&msg[..], &bad_sig);
+        assert!(single_res.is_err());
+
+        // It also should not verify with the strict checks:
+        let strict_res = pk_malicious.verify_strict(&msg[..], &bad_sig);
+        assert!(strict_res.is_err());
+
+        let batch_res = verify_batch(&[&msg[..], &msg[..], &msg[..]],
+                                     &[ok_sig, bad_sig, third_party_sig],
+                                     &[keypair.public, pk_malicious, third_party_keypair.public]);
+
+        // A set of malicious signatures constructed through an existing (sig,
+        // msg, pk) triplet via adding small torsion components to the R portion
+        // of the signature and the public key should result in an error.
+        assert!(batch_res.is_err());
+    }
+
+    // XXX add test for Mikkel Fahnøe Jørgensen's attack: https://github.com/jedisct1/libsodium/issues/112
 }
 
 #[cfg(all(test, feature = "serde"))]
