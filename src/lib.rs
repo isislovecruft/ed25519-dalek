@@ -255,10 +255,13 @@ mod errors;
 mod public;
 mod secret;
 mod signature;
+#[cfg(feature = "aggregate")]
+mod state;
 
 // Export everything public in ed25519.
 pub use crate::ed25519::*;
 
 // If the "aggregate" feature was enabled, also export everything public in the
 // aggregate module.
+#[cfg(feature = "aggregate")]
 pub use crate::aggregate::*;

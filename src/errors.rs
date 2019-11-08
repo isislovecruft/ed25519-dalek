@@ -36,6 +36,16 @@ pub(crate) enum InternalError {
     },
     /// The verification equation wasn't satisfied
     VerifyError,
+
+    #[cfg(feature = "aggregate")]
+    /// There was an error in the aggregate signing protocol wherein two vectors
+    /// were not the same size.
+    AggregateSigningVectorLengthError,
+
+    #[cfg(feature = "aggregate")]
+    /// There was an error in the aggregate signing protocol wherein one of the
+    /// other signers did not properly commit to an ephemeral public key.
+    AggregateSigningCommitmentOpenError,
 }
 
 impl Display for InternalError {
@@ -49,6 +59,12 @@ impl Display for InternalError {
                 => write!(f, "{} must be {} bytes in length", n, l),
             InternalError::VerifyError
                 => write!(f, "Verification equation was not satisfied"),
+            #[cfg(feature = "aggregate")]
+            InternalError::AggregateSigningVectorLengthError
+                => write!(f, "The commitments and ephemeral public keys vectors were unequal length"),
+            #[cfg(feature = "aggregate")]
+            InternalError::AggregateSigningCommitmentOpenError
+                => write!(f, "Could not open commitment(s) to (an) ephemeral public key(s)"),
         }
     }
 }

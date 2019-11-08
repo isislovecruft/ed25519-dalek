@@ -8,22 +8,15 @@
 // - isis agora lovecruft <isis@patternsinthevoid.net>
 
 //! Aggregatable ed25519 signatures.
-//!
-//! Aggregatable signatures are compact signatures over many, potentially
-//! different, messages made by several parties whose public keys are also
-//! aggregatable into one single compact key.  This allows for verification of
-//! one aggregated signature with one aggregated public key, over many messages,
-//! saving space over the standard batch verification method.
 
-use core::fmt::Debug;
+use std::fmt::Debug;
 
-use curve25519_dalek::constants::ED25519_BASEPOINT_TABLE;
+use std::vec::Vec;
+
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use curve25519_dalek::edwards::EdwardsPoint;
 use curve25519_dalek::scalar::Scalar;
 use curve25519_dalek::traits::Identity;
-
-use rand::rngs::OsRng;
 
 use sha2::Sha512;
 use sha2::Digest;
@@ -38,7 +31,9 @@ use serde::{Deserialize, Serialize};
 use serde::{Deserializer, Serializer};
 
 use crate::constants::*;
-use crate::errors::*;
+use crate::errors::InternalError;
+use crate::errors::SignatureError;
+use crate::ed25519::Keypair;
 use crate::public::PublicKey;
 use crate::signature::check_scalar;
 
@@ -240,6 +235,12 @@ impl<'a> From<&'a [PublicKey]> for AggregatePublicKey {
     }
 }
 
+impl From<Vec<PublicKey>> for AggregatePublicKey {
+    fn from(public_keys: Vec<PublicKey>) -> AggregatePublicKey {
+        (&public_keys[..]).into()
+    }
+}
+
 impl AggregatePublicKey {
     /// Convert this public key to a byte array.
     #[inline]
@@ -316,49 +317,4 @@ pub struct AggregateKeypair {
     pub(crate) commitment: [u8; 64],
 }
 
-impl AggregateKeypair {
-    /// Perform round one of an aggregated multiparty signing computation.
-    ///
-    /// This round consists of choosing an ephemeral keypair, `(r, R)` s.t.
-    /// `R = G * r` and then computing a commitment to the ephemeral public key
-    /// as `t = H(R)`.
-    ///
-    /// The resulting hash, `t`, must then be sent to all other signers in this
-    /// `AggregatePublicKey`.  Once you have received all `t`s from all the
-    /// other signers, you may send `R` and begin collecting everyone else's
-    /// `R`s, then move on to `sign_round_2`.
-    ///
-    /// # Returns
-    ///
-    /// A `AggregateSigning` state machine, and a callback function which should
-    /// be called once the other parties' `t`s are collected.
-    pub fn sign_round_1(&self)
-        -> (AggregateSigning::RoundOne,
-            fn(&self,
-               state: AggregateSigning::RoundOne,
-               commitments: Vec<[u8; 64]) -> AggregateSigning::RoundTwo))
-    {
-        let mut csprng = OsRng{};
-        let mut t: Sha512 = Sha512::new();
-        let mut hash: [u8; 64] = [0u8; 64];
-
-        let r: Scalar = Scalar::random(&mut csprng);
-        let R: EdwardsPoint = &ED25519_BASEPOINT_TABLE * &r;
-        let R_compressed: CompressedEdwardsY = R.compress();
-
-        t.input("ed25519-dalek aggregate sign rd1");
-        t.input(R_compressed.as_bytes());
-
-        hash.copy_from_slice(t.result().as_slice());
-
-        let state_machine = AggregateSigning::RoundOne {
-            my_ephemeral_secret: r,
-            my_ephemeral_public: R,
-            my_commitment: hash,
-        };
-    }
-
-    pub fn sign_round_2() {
-
-    }
-}
+// XXX better constructors for aggregate keypairs
