@@ -36,10 +36,11 @@ use crate::errors::SignatureError;
 use crate::ed25519::Keypair;
 use crate::public::PublicKey;
 use crate::signature::check_scalar;
+use crate::state::compute_challenge;
 
 /// An aggregate ed25519 signature over many messages, made by several signers.
 #[allow(non_snake_case)]
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Default, Eq, PartialEq)]
 pub struct AggregateSignature {
     pub(crate) R: CompressedEdwardsY,
     pub(crate) s: Scalar,
@@ -177,6 +178,7 @@ impl<'d> Deserialize<'d> for AggregateSignature {
 }
 
 /// An aggregated public key.
+#[derive(Copy, Clone, Default, Eq, PartialEq)]
 pub struct AggregatePublicKey(pub(crate) CompressedEdwardsY, pub(crate) EdwardsPoint);
 
 impl Debug for AggregatePublicKey {
@@ -213,30 +215,36 @@ impl<'a> From<&'a [PublicKey]> for AggregatePublicKey {
     /// ```
     fn from(public_keys: &[PublicKey]) -> AggregatePublicKey {
         let mut apk: EdwardsPoint = EdwardsPoint::identity();
-        let mut hash = [0u8; 64];
 
         for i in 0..public_keys.len() {
-            let mut h = Sha512::new();
+            let transcript: Scalar = compute_transcript(&public_keys[i], public_keys);
 
-            h.input("ed25519-dalek aggregate public key");
-            h.input(public_keys[i].as_bytes());
-
-            for j in 0..public_keys.len() {
-                h.input(public_keys[j].as_bytes());
-            }
-            hash.copy_from_slice(h.result().as_slice());
-
-            let transcript: Scalar = Scalar::from_bytes_mod_order_wide(&hash);
-
-            apk += public_keys[i].1 * transcript;
+            apk += public_keys[i].1 * transcript; // XXX use vartime_multiscalar_mul instead
         }
 
         AggregatePublicKey(apk.compress(), apk)
     }
 }
 
-impl From<Vec<PublicKey>> for AggregatePublicKey {
-    fn from(public_keys: Vec<PublicKey>) -> AggregatePublicKey {
+fn compute_transcript(my_public_key: &PublicKey, all_public_keys: &[PublicKey]) -> Scalar {
+    let mut h = Sha512::new();
+    let mut hash = [0u8; 64];
+
+    h.input("ed25519-dalek aggregate public key");
+    h.input(my_public_key.as_bytes());
+
+    // XXX should we modify this to have this be the prefix so we can
+    // clone the hash's state and avoid rehashing every time?
+    for pk in all_public_keys.iter() {
+        h.input(pk.as_bytes());
+    }
+    hash.copy_from_slice(h.result().as_slice());
+
+    Scalar::from_bytes_mod_order_wide(&hash)
+}
+
+impl From<&Vec<PublicKey>> for AggregatePublicKey {
+    fn from(public_keys: &Vec<PublicKey>) -> AggregatePublicKey {
         (&public_keys[..]).into()
     }
 }
@@ -283,7 +291,7 @@ impl AggregatePublicKey {
     /// # }
     /// #
     /// # fn main() {
-    /// #     doctest();
+    /// #     doctest().unwrap();
     /// # }
     /// ```
     ///
@@ -309,12 +317,51 @@ impl AggregatePublicKey {
 
         Ok(AggregatePublicKey(compressed, point))
     }
+
+    /// Verify an [`AggregateSignature`] on a `message` with this aggregate public key.
+    #[allow(non_snake_case)]
+    pub fn verify(&self, signature: &AggregateSignature, message: &[u8]) -> Result<(), SignatureError> {
+        let c = compute_challenge(&signature.R, &self, message);
+        let R = EdwardsPoint::vartime_double_scalar_mul_basepoint(&(-c), &self.1, &signature.s);
+
+        if R.compress() == signature.R {
+            return Ok(());
+        }
+        Err(SignatureError(InternalError::VerifyError))
+    }
 }
 
+/// An aggregated public key, along with our [`Keypair`] and a commitment to our
+/// public key.
+#[derive(Debug, Default)]
 pub struct AggregateKeypair {
+    /// An aggregation of several [`PublicKey`]s.
     pub aggregated_public: AggregatePublicKey,
+    /// This signer's [`Keypair`].
     pub my_keypair: Keypair,
-    pub(crate) commitment: [u8; 64],
+    /// A commitment to this signer's [`PublicKey`] formed by taking the SHA-512
+    /// digest of the [`PublicKey`] and converting it into a [`Scalar`] by reducing
+    /// modulo the group order.
+    pub(crate) commitment: Scalar,
 }
 
-// XXX better constructors for aggregate keypairs
+impl AggregateKeypair {
+    /// Create an [`AggregateKeypair`].
+    ///
+    /// # Warning
+    ///
+    /// All parties in the aggregate signing protocol **MUST** provide the
+    /// `all_public_keys` vector with identical ordering, otherwise a different
+    /// aggregate public key will be computed, do to the vector of public keys
+    /// being passed into a protocol transcript which hashes the state.
+    pub fn new(all_public_keys: &Vec<PublicKey>, my_keypair: Keypair) -> AggregateKeypair {
+        let apk: AggregatePublicKey = (all_public_keys[..]).into();
+        let transcript: Scalar = compute_transcript(&my_keypair.public, &all_public_keys[..]);
+
+        AggregateKeypair {
+            aggregated_public: apk,
+            my_keypair,
+            commitment: transcript,
+        }
+    }
+}
