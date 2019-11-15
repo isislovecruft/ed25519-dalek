@@ -707,7 +707,7 @@ impl AggregateSigning<PartialSignature> {
         let mut s: Scalar = self.data.si.clone();
 
         for sj in partial_signatures.iter() {
-            s *= sj;
+            s *= sj; // XXX this is \sigma in the paper but R' (a point) is supposed to be a product??
         }
 
         AggregateSignature {
