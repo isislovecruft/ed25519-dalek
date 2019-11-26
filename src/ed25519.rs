@@ -29,9 +29,11 @@ pub use curve25519_dalek::digest::Digest;
 pub use crate::batch::*;
 pub use crate::constants::*;
 pub use crate::errors::*;
+pub use crate::precomputed::*;
 pub use crate::public::*;
 pub use crate::secret::*;
 pub use crate::signature::*;
+pub use crate::traits::*;
 
 /// An ed25519 keypair.
 #[derive(Debug, Default)] // we derive Default in order to use the clear() method in Drop
