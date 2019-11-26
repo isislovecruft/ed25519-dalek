@@ -10,6 +10,7 @@
 //! ed25519 public keys.
 
 use core::fmt::Debug;
+use core::ops::{Neg, Mul};
 
 use curve25519_dalek::constants;
 use curve25519_dalek::digest::generic_array::typenum::U64;
@@ -29,10 +30,13 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "serde")]
 use serde::{Deserializer, Serializer};
 
-use crate::constants::*;
-use crate::errors::*;
-use crate::secret::*;
-use crate::signature::*;
+use crate::constants::PUBLIC_KEY_LENGTH;
+use crate::errors::InternalError;
+use crate::errors::SignatureError;
+use crate::signature::Signature;
+use crate::secret::ExpandedSecretKey;
+use crate::secret::SecretKey;
+use crate::traits::IsPublicKey;
 
 /// An ed25519 public key.
 #[derive(Copy, Clone, Default, Eq, PartialEq)]
@@ -47,6 +51,30 @@ impl Debug for PublicKey {
 impl AsRef<[u8]> for PublicKey {
     fn as_ref(&self) -> &[u8] {
         self.as_bytes()
+    }
+}
+
+impl<'a> Neg for &'a PublicKey {
+    type Output = EdwardsPoint;
+
+    fn neg(self) -> EdwardsPoint {
+        -(&self.1)
+    }
+}
+
+impl <'a, 'b> Mul<&'b Scalar> for &'a PublicKey {
+    type Output = EdwardsPoint;
+
+    fn mul(self, scalar: &'b Scalar) -> EdwardsPoint {
+        self.1.mul(scalar)
+    }
+}
+
+impl <'a, 'b> Mul<&'a PublicKey> for &'b Scalar {
+    type Output = EdwardsPoint;
+
+    fn mul(self, table: &'a PublicKey) -> EdwardsPoint {
+        table * self
     }
 }
 
@@ -159,35 +187,18 @@ impl PublicKey {
         PublicKey(compressed, point)
     }
 
-    /// Verify a signature on a message with this keypair's public key.
+    /// Verify a signature on a message with this public key.
     ///
-    /// # Return
+    /// # Returns
     ///
     /// Returns `Ok(())` if the signature is valid, and `Err` otherwise.
-    #[allow(non_snake_case)]
     pub fn verify(
         &self,
         message: &[u8],
         signature: &Signature
     ) -> Result<(), SignatureError>
     {
-        let mut h: Sha512 = Sha512::new();
-        let R: EdwardsPoint;
-        let k: Scalar;
-        let minus_A: EdwardsPoint = -self.1;
-
-        h.input(signature.R.as_bytes());
-        h.input(self.as_bytes());
-        h.input(&message);
-
-        k = Scalar::from_hash(h);
-        R = EdwardsPoint::vartime_double_scalar_mul_basepoint(&k, &(minus_A), &signature.s);
-
-        if R.compress() == signature.R {
-            Ok(())
-        } else {
-            Err(SignatureError(InternalError::VerifyError))
-        }
+        <&Self as IsPublicKey>::verify(&self, message, signature)
     }
 
     /// Verify a `signature` on a `prehashed_message` using the Ed25519ph algorithm.
@@ -208,7 +219,6 @@ impl PublicKey {
     /// `Keypair` on the `prehashed_message`.
     ///
     /// [rfc8032]: https://tools.ietf.org/html/rfc8032#section-5.1
-    #[allow(non_snake_case)]
     pub fn verify_prehashed<D>(
         &self,
         prehashed_message: D,
@@ -218,34 +228,10 @@ impl PublicKey {
     where
         D: Digest<OutputSize = U64>,
     {
-        let mut h: Sha512 = Sha512::default();
-        let R: EdwardsPoint;
-        let k: Scalar;
-
-        let ctx: &[u8] = context.unwrap_or(b"");
-        debug_assert!(ctx.len() <= 255, "The context must not be longer than 255 octets.");
-
-        let minus_A: EdwardsPoint = -self.1;
-
-        h.input(b"SigEd25519 no Ed25519 collisions");
-        h.input(&[1]); // Ed25519ph
-        h.input(&[ctx.len() as u8]);
-        h.input(ctx);
-        h.input(signature.R.as_bytes());
-        h.input(self.as_bytes());
-        h.input(prehashed_message.result().as_slice());
-
-        k = Scalar::from_hash(h);
-        R = EdwardsPoint::vartime_double_scalar_mul_basepoint(&k, &(minus_A), &signature.s);
-
-        if R.compress() == signature.R {
-            Ok(())
-        } else {
-            Err(SignatureError(InternalError::VerifyError))
-        }
+        <&Self as IsPublicKey>::verify_prehashed(&self, prehashed_message, context, signature)
     }
 
-    /// Strictly verify a signature on a message with this keypair's public key.
+    /// Strictly verify a signature on a message with this public key.
     ///
     /// # On The (Multiple) Sources of Malleability in Ed25519 Signatures
     ///
@@ -307,41 +293,31 @@ impl PublicKey {
     /// # Return
     ///
     /// Returns `Ok(())` if the signature is valid, and `Err` otherwise.
-    #[allow(non_snake_case)]
     pub fn verify_strict(
         &self,
         message: &[u8],
         signature: &Signature,
     ) -> Result<(), SignatureError>
     {
-        let mut h: Sha512 = Sha512::new();
-        let R: EdwardsPoint;
-        let k: Scalar;
-        let minus_A: EdwardsPoint = -self.1;
-        let signature_R: EdwardsPoint;
+        <&Self as IsPublicKey>::verify_strict(&self, message, signature)
+    }
+}
 
-        match signature.R.decompress() {
-            None => return Err(SignatureError(InternalError::VerifyError)),
-            Some(x) => signature_R = x,
-        }
+impl<'a> IsPublicKey<'_> for &'a PublicKey {
+    type Key = &'a EdwardsPoint;
 
-        // Logical OR is fine here as we're not trying to be constant time.
-        if signature_R.is_small_order() || self.1.is_small_order() {
-            return Err(SignatureError(InternalError::VerifyError));
-        }
+    fn vartime_double_scalar_mul_basepoint(&self, k: &Scalar, s: &Scalar) -> EdwardsPoint {
+        // XXX this &-* "borrow the result of the negation after dereferencing"
+        // syntax is royally fucked and completely unreadable
+        EdwardsPoint::vartime_double_scalar_mul_basepoint(&k, &-*self, s)
+    }
 
-        h.input(signature.R.as_bytes());
-        h.input(self.as_bytes());
-        h.input(&message);
+    fn public_key(&self) -> Self::Key {
+        &self.1
+    }
 
-        k = Scalar::from_hash(h);
-        R = EdwardsPoint::vartime_double_scalar_mul_basepoint(&k, &(minus_A), &signature.s);
-
-        if R == signature_R {
-            Ok(())
-        } else {
-            Err(SignatureError(InternalError::VerifyError))
-        }
+    fn public_key_as_point(&self) -> EdwardsPoint {
+        self.1
     }
 }
 

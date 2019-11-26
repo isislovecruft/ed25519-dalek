@@ -19,6 +19,7 @@ mod ed25519_benches {
     use ed25519_dalek::ExpandedSecretKey;
     use ed25519_dalek::Keypair;
     use ed25519_dalek::PublicKey;
+    use ed25519_dalek::PublicKeyTable;
     use ed25519_dalek::Signature;
     use ed25519_dalek::verify_batch;
     use rand::thread_rng;
@@ -94,6 +95,27 @@ mod ed25519_benches {
         });
     }
 
+    fn precomputed_key_generation(c: &mut Criterion) {
+        let mut csprng: ThreadRng = thread_rng();
+        let keypair = Keypair::generate(&mut csprng);
+
+        c.bench_function("Ed25519 public key table generation", move |b| {
+                         b.iter(| | PublicKeyTable::from(&keypair.public)) 
+        });
+    }
+
+    fn precomputed_key_single_signature_verification(c: &mut Criterion) {
+        let mut csprng = thread_rng();
+        let keypair = Keypair::generate(&mut csprng);
+        let precomputed_key: PublicKeyTable = (&keypair.public).into();
+        let msg = b"";
+        let signature: Signature = keypair.sign(&msg[..]);
+        
+        c.bench_function("Ed25519 single signature verification with public key table", move |b| {
+                         b.iter(| | precomputed_key.verify(&msg[..], &signature))
+        });
+    }
+
     criterion_group!{
         name = ed25519_benches;
         config = Criterion::default();
@@ -104,6 +126,8 @@ mod ed25519_benches {
             verify_strict,
             verify_batch_signatures,
             key_generation,
+            precomputed_key_generation,
+            precomputed_key_single_signature_verification,
     }
 }
 

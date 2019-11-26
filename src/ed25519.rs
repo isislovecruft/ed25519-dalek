@@ -37,9 +37,11 @@ use curve25519_dalek::scalar::Scalar;
 
 pub use crate::constants::*;
 pub use crate::errors::*;
+pub use crate::precomputed::*;
 pub use crate::public::*;
 pub use crate::secret::*;
 pub use crate::signature::*;
+pub use crate::traits::*;
 
 /// Verify a batch of `signatures` on `messages` with their respective `public_keys`.
 ///

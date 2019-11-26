@@ -250,9 +250,11 @@ extern crate sha2;
 mod constants;
 mod ed25519;
 mod errors;
+mod precomputed;
 mod public;
 mod secret;
 mod signature;
+mod traits;
 
 // Export everything public in ed25519.
 pub use crate::ed25519::*;
