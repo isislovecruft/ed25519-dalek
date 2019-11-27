@@ -159,28 +159,3 @@ impl<'a> IsPublicKey<'_> for &'a PublicKeyTable {
         self.1.basepoint()
     }
 }
-
-//impl Vartime // XXX no, look at VartimeMultiscalarMul versus VartimePrecomputedMultiscalarMul
-//
-// impl<T> VartimePrecomputedMultiscalarMul for T
-// where
-//     T: IsPublicKey,
-// {
-//     type Point: T;
-// 
-//     fn optional_mixed_multiscalar_mul<I, J, K>(
-//         &self,
-//         static_scalars: I,
-//         dynamic_scalars: J,
-//         dynamic_points: K,
-//     ) -> Option<Self::Point>
-//     where
-//         I: IntoIterator,
-//         I::Item: Borrow<Scalar>,
-//         J: IntoIterator,
-//         J::Item: Borrow<Scalar>,
-//         K: IntoIterator<Item = Option<Self::Point>> 
-//     {
-// 
-//     }
-// }
