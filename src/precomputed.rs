@@ -184,33 +184,3 @@ impl<'a> IsPublicKey<'_> for &'a PublicKeyTable {
 // 
 //     }
 // }
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    use crate::traits::IsPublicKey;
-    use crate::Keypair;
-
-
-    use rand::rngs::OsRng;
-
-    #[test]
-    fn table_from_public_key() {
-        let mut csprng = OsRng;
-        let keypair = Keypair::generate(&mut csprng);
-        let precomputed_key: PublicKeyTable = (&keypair.public).into();
-    }
-
-    #[test]
-    fn table_verify() {
-        let mut csprng = OsRng;
-        let keypair = Keypair::generate(&mut csprng);
-        let precomputed_key: PublicKeyTable = (&keypair.public).into();
-        let msg = b"";
-        let signature: Signature = keypair.sign(&msg[..]);
-        let result = precomputed_key.verify(&msg[..], &signature);
-
-        assert!(result.is_ok());
-    }
-}

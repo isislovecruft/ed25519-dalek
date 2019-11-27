@@ -211,6 +211,25 @@ mod integrations {
 
         assert!(public_from_secret == public_from_expanded_secret);
     }
+
+    #[test]
+    fn table_from_public_key() {
+        let mut csprng = OsRng;
+        let keypair = Keypair::generate(&mut csprng);
+        let _precomputed_key: PublicKeyTable = (&keypair.public).into();
+    }
+
+    #[test]
+    fn table_verify() {
+        let mut csprng = OsRng;
+        let keypair = Keypair::generate(&mut csprng);
+        let precomputed_key: PublicKeyTable = (&keypair.public).into();
+        let msg = b"";
+        let signature: Signature = keypair.sign(&msg[..]);
+        let result = precomputed_key.verify(&msg[..], &signature);
+
+        assert!(result.is_ok());
+    }
 }
 
 #[cfg(all(test, feature = "serde"))]
