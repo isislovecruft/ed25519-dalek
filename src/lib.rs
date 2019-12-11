@@ -249,6 +249,8 @@ extern crate serde;
 extern crate sha2;
 extern crate zeroize;
 
+#[cfg(feature = "aggregate")]
+mod aggregate;
 #[cfg(all(any(feature = "batch", feature = "batch_deterministic"), any(feature = "std", feature = "alloc")))]
 mod batch;
 mod constants;
@@ -262,3 +264,7 @@ mod signature;
 pub use crate::ed25519::*;
 #[cfg(all(any(feature = "batch", feature = "batch_deterministic"), any(feature = "std", feature = "alloc")))]
 pub use crate::batch::*;
+
+// If the "aggregate" feature was enabled, also export everything public in the
+// aggregate module.
+pub use crate::aggregate::*;

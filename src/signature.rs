@@ -73,7 +73,7 @@ impl Debug for Signature {
 
 #[cfg(feature = "legacy_compatibility")]
 #[inline(always)]
-fn check_scalar(bytes: [u8; 32]) -> Result<Scalar, SignatureError> {
+pub(crate) fn check_scalar(bytes: [u8; 32]) -> Result<Scalar, SignatureError> {
     // The highest 3 bits must not be set.  No other checking for the
     // remaining 2^253 - 2^252 + 27742317777372353535851937790883648493
     // potential non-reduced scalars is performed.
@@ -89,7 +89,7 @@ fn check_scalar(bytes: [u8; 32]) -> Result<Scalar, SignatureError> {
 
 #[cfg(not(feature = "legacy_compatibility"))]
 #[inline(always)]
-fn check_scalar(bytes: [u8; 32]) -> Result<Scalar, SignatureError> {
+pub(crate) fn check_scalar(bytes: [u8; 32]) -> Result<Scalar, SignatureError> {
     // Since this is only used in signature deserialisation (i.e. upon
     // verification), we can do a "succeed fast" trick by checking that the most
     // significant 4 bits are unset.  If they are unset, we can succeed fast
