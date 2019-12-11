@@ -41,6 +41,16 @@ pub(crate) enum InternalError {
     ArrayLengthError{ name_a: &'static str, length_a: usize,
                       name_b: &'static str, length_b: usize,
                       name_c: &'static str, length_c: usize, },
+
+    #[cfg(feature = "aggregate")]
+    /// There was an error in the aggregate signing protocol wherein two vectors
+    /// were not the same size.
+    AggregateSigningVectorLengthError,
+
+    #[cfg(feature = "aggregate")]
+    /// There was an error in the aggregate signing protocol wherein one of the
+    /// other signers did not properly commit to an ephemeral public key.
+    AggregateSigningCommitmentOpenError,
 }
 
 impl Display for InternalError {
@@ -59,6 +69,12 @@ impl Display for InternalError {
                                              name_c: nc, length_c: lc, }
                 => write!(f, "Arrays must be the same length: {} has length {},
                               {} has length {}, {} has length {}.", na, la, nb, lb, nc, lc),
+            #[cfg(feature = "aggregate")]
+            InternalError::AggregateSigningVectorLengthError
+                => write!(f, "The commitments and ephemeral public keys vectors were unequal length"),
+            #[cfg(feature = "aggregate")]
+            InternalError::AggregateSigningCommitmentOpenError
+                => write!(f, "Could not open commitment(s) to (an) ephemeral public key(s)"),
         }
     }
 }
