@@ -41,6 +41,8 @@ pub(crate) enum InternalError {
     ArrayLengthError{ name_a: &'static str, length_a: usize,
                       name_b: &'static str, length_b: usize,
                       name_c: &'static str, length_c: usize, },
+    /// There was an error performing the lattice reduction.
+    LatticeReductionError,
 }
 
 impl Display for InternalError {

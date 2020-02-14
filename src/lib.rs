@@ -239,6 +239,8 @@ extern crate std;
 
 #[cfg(all(feature = "alloc", not(feature = "std")))]
 extern crate alloc;
+#[cfg(feature = "lattice_reduction")]
+extern crate byteorder;
 extern crate curve25519_dalek;
 #[cfg(all(any(feature = "batch", feature = "batch_deterministic"), any(feature = "std", feature = "alloc")))]
 extern crate merlin;
@@ -255,6 +257,8 @@ mod constants;
 mod ed25519;
 mod errors;
 mod public;
+#[cfg(feature = "lattice_reduction")]
+mod reduce;
 mod secret;
 mod signature;
 
