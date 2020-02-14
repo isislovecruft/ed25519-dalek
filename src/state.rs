@@ -720,3 +720,177 @@ impl AggregateSigning<PartialSignature> {
 // XXX many more things can be &Vec<T> instead of Vec<T>
 
 // XXX need Zeroize/Drop impls
+
+#[cfg(test)]
+mod test {
+    #[cfg(feature = "std")]
+    use std::vec::Vec;
+    #[cfg(feature = "alloc")]
+    use alloc::vec::Vec;
+
+    use curve25519_dalek::scalar::Scalar;
+    use curve25519_dalek::edwards::EdwardsPoint;
+
+    use rand::rngs::OsRng;
+
+    use sha2::Sha512;
+
+    use super::{Keypair, PublicKey};
+    use super::{AggregateSigning, RoundOne};
+    use super::{AggregateSignature, AggregateSigningState, SignatureError};
+
+    #[test]
+    fn aggregate_verify() {
+        // To start, you must have your own keypair.
+        let mut csprng = OsRng{};
+        let my_keypair = Keypair::generate(&mut csprng);
+
+        // At some point before the aggregate signing protocol, or during the
+        // communications phases of either round one or round two, you must collect
+        // an ordered list of the public keys of the other signers.
+        let mut their_public_keys: Vec<PublicKey> = Vec::new();
+
+        // For example's sake, we generate them for Alice and Bob here:
+        let alice_keypair = Keypair::generate(&mut csprng);
+        let bob_keypair = Keypair::generate(&mut csprng);
+
+        their_public_keys.push(alice_keypair.public);
+        their_public_keys.push(bob_keypair.public);
+
+        // We'll also need all the public keys to create the aggregate public key
+        // later on.  Note that it's vital that this vector be in the same order for
+        // all signing parties.
+        let mut all_public_keys = their_public_keys.clone();
+        all_public_keys.push(my_keypair.public);
+
+        // Create our protocol state machine.
+        let state_machine = AggregateSigning::<RoundOne>::new(&mut csprng);
+
+        // Create the aggregated public keypair from our keypair and the other
+        // signers' public keys.
+        let state_machine = state_machine.create_aggregate_key(&all_public_keys, my_keypair);
+        let aggregate_public_key = state_machine.aggregate_public_key();
+
+        // At this point, you can access a commitment to an ephemeral public value,
+        // which you should send to all other signing parties.  The commitment is
+        // accessible at this point in the protocol as:
+        let my_commitment = state_machine.my_commitment();
+
+        // Obviously, you should then send it.
+        //
+        // send_to_other_signers(my_commitment);
+        //
+        // And await their responses containing their commitments to their ephemeral
+        // public values:
+        let mut their_commitments: Vec<Scalar> = Vec::new();
+
+        // receive_from_other_signers(&mut their_commitments);
+
+        // Setup fake protocol runs for the other signers:
+        let alice_state = AggregateSigning::<RoundOne>::new(&mut csprng);
+        let bob_state = AggregateSigning::<RoundOne>::new(&mut csprng);
+        
+        their_commitments.push(alice_state.my_commitment());
+        their_commitments.push(bob_state.my_commitment());
+
+        let mut alice_their_commitments: Vec<Scalar> = Vec::new();
+        let mut bob_their_commitments: Vec<Scalar> = Vec::new();
+
+        alice_their_commitments.push(bob_state.my_commitment());
+        alice_their_commitments.push(state_machine.my_commitment());
+
+        bob_their_commitments.push(alice_state.my_commitment());
+        bob_their_commitments.push(state_machine.my_commitment());
+
+        // Once you have collected all their commitments, you may proceed to round
+        // two of the protocol:
+        let state_machine = state_machine.to_round_two(their_commitments);
+
+        // At this point, you now have access to the opening to your commitment,
+        // that is, your ephemeral public key, which you should send to all the
+        // other signers.
+        let my_ephemeral_public = state_machine.my_ephemeral_public();
+
+        // send_to_other_signers(state_machine.my_ephemeral_public());
+        //
+        // And await their responses containing their commitment openings:
+        let mut their_ephemeral_publics: Vec<EdwardsPoint> = Vec::new();
+
+        // receive_from_other_signers(&mut their_ephemeral_publics);
+        //
+        // Move everyone else's execution to round two.
+        let alice_state = alice_state.to_round_two(alice_their_commitments);
+        let bob_state = bob_state.to_round_two(bob_their_commitments);
+
+        // Compute the aggregated public keys.
+        let mut alice_state = alice_state.create_aggregate_key(&all_public_keys, alice_keypair);
+        let mut bob_state = bob_state.create_aggregate_key(&all_public_keys, bob_keypair);
+
+        their_ephemeral_publics.push(alice_state.my_ephemeral_public());
+        their_ephemeral_publics.push(bob_state.my_ephemeral_public());
+
+        let mut alice_their_publics: Vec<EdwardsPoint> = Vec::new();
+        let mut bob_their_publics: Vec<EdwardsPoint> = Vec::new();
+
+        alice_their_publics.push(bob_state.my_ephemeral_public());
+        alice_their_publics.push(state_machine.my_ephemeral_public());
+
+        bob_their_publics.push(alice_state.my_ephemeral_public());
+        bob_their_publics.push(state_machine.my_ephemeral_public());
+
+        // Now you're ready to move on to round three of the protocol.  However, be
+        // aware that the end of round two will `Result` in a `SignatureError` if
+        // any of the openings were not valid for their respective commitment.
+        let state_machine = state_machine.to_round_three(their_ephemeral_publics).unwrap();
+
+        // Move everyone else's execution to round three.
+        let alice_state = alice_state.to_round_three(alice_their_publics).unwrap();
+        let bob_state = bob_state.to_round_three(bob_their_publics).unwrap();
+
+        // We can now compute our partial signature for a common message. Note that
+        // all signers must sign *the same message*.
+        let message = b"All Computers Are Bad";
+
+        let state_machine = state_machine.partial_sign(&message[..]);
+
+        let my_partial_signature = state_machine.my_partial_signature();
+
+        // Once again, we must send our partial signature to all the other signers...
+        //
+        // send_to_other_signers(my_partial_signature);
+        //
+        // ... and wait to collect all other partial signatures from the other
+        // signers.
+        let mut their_partial_signatures: Vec<Scalar> = Vec::new();
+
+        // receive_from_other_signers(&mut their_partial_signatures);
+
+        // Compute partial signatures for everyone else.
+        let alice_state = alice_state.partial_sign(&message[..]);
+        let bob_state = bob_state.partial_sign(&message[..]);
+
+        their_partial_signatures.push(alice_state.my_partial_signature());
+        their_partial_signatures.push(bob_state.my_partial_signature());
+
+        let mut alice_their_partials: Vec<Scalar> = Vec::new();
+        let mut bob_their_partials: Vec<Scalar> = Vec::new();
+
+        alice_their_partials.push(bob_state.my_partial_signature());
+        alice_their_partials.push(state_machine.my_partial_signature());
+
+        bob_their_partials.push(alice_state.my_partial_signature());
+        bob_their_partials.push(state_machine.my_partial_signature());
+        //
+        // We can now move on to compute the final aggregated signature.
+        let aggregated_signature = state_machine.finish(&their_partial_signatures);
+
+        // Finish the protocol for everyone else.
+        let alice_aggregated_signature = alice_state.finish(&alice_their_partials);
+        let bob_aggregated_signature = bob_state.finish(&bob_their_partials);
+
+        // To verify the aggregate signature, do:
+        let res = aggregate_public_key.verify(&aggregated_signature, &message[..]);
+
+        assert!(res.is_ok());
+    }
+}

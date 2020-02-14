@@ -166,11 +166,11 @@ impl<'d> Deserialize<'d> for AggregateSignature {
                 formatter.write_str("An aggregate ed25519 signature as 64 bytes.")
             }
 
-            fn visit_bytes<E>(self, bytes: &[u8]) -> Result<Signature, E>
+            fn visit_bytes<E>(self, bytes: &[u8]) -> Result<AggregateSignature, E>
             where
                 E: SerdeError,
             {
-                Signature::from_bytes(bytes).or(Err(SerdeError::invalid_length(bytes.len(), &self)))
+                AggregateSignature::from_bytes(bytes).or(Err(SerdeError::invalid_length(bytes.len(), &self)))
             }
         }
         deserializer.deserialize_bytes(SignatureVisitor)
@@ -231,7 +231,7 @@ fn compute_transcript(my_public_key: &PublicKey, all_public_keys: &[PublicKey]) 
     let mut hash = [0u8; 64];
 
     h.input("ed25519-dalek aggregate public key");
-    h.input(my_public_key.as_bytes());
+    // XXX h.input(my_public_key.as_bytes());
 
     // XXX should we modify this to have this be the prefix so we can
     // clone the hash's state and avoid rehashing every time?
@@ -333,7 +333,7 @@ impl AggregatePublicKey {
 
 /// An aggregated public key, along with our [`Keypair`] and a commitment to our
 /// public key.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct AggregateKeypair {
     /// An aggregation of several [`PublicKey`]s.
     pub aggregated_public: AggregatePublicKey,
