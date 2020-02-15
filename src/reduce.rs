@@ -111,7 +111,7 @@ impl<'a, 'b> Mul<&'b Integer255> for &'a Integer255 {
         let mut limbs: [u64; 8] = [0u64; 8];
 
         for i in 0..4 {
-            let carry: u64 = 0;
+            let mut carry: u64 = 0;
 
             for j in 0..4 {
                 let z: u128 = m(self.0[i], b.0[j]) + limbs[i+j] as u128 + carry as u128;
@@ -126,17 +126,26 @@ impl<'a, 'b> Mul<&'b Integer255> for &'a Integer255 {
     }
 }
 
-macro_rules! impl_fn_lshift {
-    (Output = $out:ty, Size = $size:expr, Function = $fn:ident) => {
+#[inline(always)]
+fn overflowing_add(a: u64, b: u64) -> (u64, bool) {
+    a.overflowing_add(b)
+}
 
-    }
+#[inline(always)]
+fn overflowing_sub(a: u64, b: u64) -> (u64, bool) {
+    a.overflowing_sub(b)
 }
 
 impl Integer255 {
-    const SIZE: usize = 4;
+    #[inline(always)]
+    fn op_lshift<F>(a: &Integer255, b: &Integer255, shift: usize, op: F) -> Integer255
+    where
+        F: Fn(u64, u64) -> (u64, bool),
+    {
+        const SIZE: usize = 4;
 
-    pub fn add_lshift(a: &Integer255, b: &Integer255, shift: usize) -> Integer255 {
-        let mut limbs: [u64; 4] = [0u64; SIZE];
+        let mut shift: usize = shift;
+        let mut limbs: [u64; SIZE] = [0u64; SIZE];
         let mut tmp_a: [u64; SIZE] = a.0;
         let mut tmp_b: [u64; SIZE] = b.0;
 
@@ -164,7 +173,7 @@ impl Integer255 {
                 shifted = (shifted << shift) | remainder;
             }
 
-            let (product, carry) = tmp_a[i].overflowing_add(shifted);
+            let (product, carry) = op(tmp_a[i], shifted);
                 
             if !carry {
                 // If the carry flag wasn't set by the last operation, the
@@ -176,10 +185,10 @@ impl Integer255 {
                 // worst case.
                 limbs[i] = u64::MAX;
 
-                let j: usize = i+1;
+                let mut j: usize = i+1;
 
                 loop {
-                    let (product, carry) = tmp_a[j].overflowing_add(product);
+                    let (product, carry) = op(tmp_a[j], product);
 
                     if carry {
                         // If the result can't fit into the last limb we
@@ -203,7 +212,18 @@ impl Integer255 {
         Integer255(limbs)
     }
 
-    pub fn sub_lshift(a: &Integer255, b: &Integer255, shift: usize) -> Integer255 {
-        unimplemented!()
+    pub fn add_lshift(a: &Integer255, b: &Integer255, shift: usize) -> Integer255 {
+        Integer255::op_lshift(&a, &b, shift, overflowing_add)
     }
+
+    pub fn sub_lshift(a: &Integer255, b: &Integer255, shift: usize) -> Integer255 {
+        Integer255::op_lshift(&a, &b, shift, overflowing_sub)
+    }
+}
+
+struct ReductionState {
+    // XXX precompute and hardcode these
+    modulus: Integer255,
+    modulus_squared: Integer510,
+    modulus_length:
 }
