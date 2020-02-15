@@ -221,9 +221,96 @@ impl Integer255 {
     }
 }
 
+// XXX figure out a way to macro-ise this
+impl Interger510 {
+    #[inline(always)]
+    fn op_lshift<F>(a: &Integer510, b: &Integer510, shift: usize, op: F) -> Integer510
+    where
+        F: Fn(u64, u64) -> (u64, bool),
+    {
+        const SIZE: usize = 8;
+
+        let mut shift: usize = shift;
+        let mut limbs: [u64; SIZE] = [0u64; SIZE];
+        let mut tmp_a: [u64; SIZE] = a.0;
+        let mut tmp_b: [u64; SIZE] = b.0;
+
+        if shift >= 64 { // XXX not sure about this squaring
+            let k: usize = shift >> 6;
+            
+            shift &= 63;
+
+            if k >= SIZE {
+                return Integer510(limbs); // XXX this should be a compile-time error
+            }
+            limbs[k] = tmp_b[SIZE-k];
+            tmp_b = limbs;
+        }
+
+        let mut carry: bool;
+        let mut product: u64 = 0;
+        let mut shifted: u64 = 0;
+        let mut remainder: u64 = 0;
+
+        for i in 0..SIZE {
+            shifted = tmp_b[i];
+
+            if shift > 0 {
+                shifted = (shifted << shift) | remainder;
+            }
+
+            let (product, carry) = op(tmp_a[i], shifted);
+                
+            if !carry {
+                // If the carry flag wasn't set by the last operation, the
+                // product is the actual product.
+                limbs[i] = product;
+            } else {
+                // Otherwise it overflowed, so we know this product is the
+                // maximum and we recursively deal with the carry in the
+                // worst case.
+                limbs[i] = u64::MAX;
+
+                let mut j: usize = i+1;
+
+                loop {
+                    let (product, carry) = op(tmp_a[j], product);
+
+                    if carry {
+                        // If the result can't fit into the last limb we
+                        // simply truncate the overflow.
+                        tmp_a[j] = u64::MAX;
+                    } else {
+                        tmp_a[j] = product;
+                        break;
+                    }
+                    if j < SIZE-1 {
+                        j += 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            if shift > 0 {
+                remainder = shifted >> (64 - shift);
+            }
+        }
+        Integer510(limbs)
+    }
+
+    pub fn add_lshift(a: &Integer510, b: &Integer510, shift: usize) -> Integer510 {
+        Integer510::op_lshift(&a, &b, shift, overflowing_add)
+    }
+
+    pub fn sub_lshift(a: &Integer510, b: &Integer510, shift: usize) -> Integer510 {
+        Integer510::op_lshift(&a, &b, shift, overflowing_sub)
+    }
+}
+
 struct ReductionState {
     // XXX precompute and hardcode these
     modulus: Integer255,
     modulus_squared: Integer510,
-    modulus_length:
+    modulus_length: usize,
+    target_length: usize,
 }
