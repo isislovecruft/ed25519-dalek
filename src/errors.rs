@@ -61,6 +61,8 @@ impl Display for InternalError {
                                              name_c: nc, length_c: lc, }
                 => write!(f, "Arrays must be the same length: {} has length {},
                               {} has length {}, {} has length {}.", na, la, nb, lb, nc, lc),
+            InternalError::LatticeReductionError
+                => write!(f, "Lattice basis reduction could not be performed"),
         }
     }
 }
@@ -82,6 +84,9 @@ impl Error for InternalError { }
 ///   only be constructed from 255-bit integers.)
 ///
 /// * Failure of a signature to satisfy the verification equation.
+///
+/// * (Only when compiled with `--features lattice_reduction`) Failure to
+///   perform 2-dimensional lattice basis reduction.
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub struct SignatureError(pub(crate) InternalError);
 
