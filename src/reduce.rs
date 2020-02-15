@@ -11,6 +11,7 @@
 
 use core::convert::TryFrom;
 use core::ops::Mul;
+use core::u64;
 
 use byteorder::{ByteOrder, LittleEndian};
 
@@ -125,11 +126,17 @@ impl<'a, 'b> Mul<&'b Integer255> for &'a Integer255 {
     }
 }
 
+macro_rules! impl_fn_lshift {
+    (Output = $out:ty, Size = $size:expr, Function = $fn:ident) => {
+
+    }
+}
+
 impl Integer255 {
     const SIZE: usize = 4;
 
     pub fn add_lshift(a: &Integer255, b: &Integer255, shift: usize) -> Integer255 {
-        let mut limbs: [u64; SIZE] = [0u64; SIZE];
+        let mut limbs: [u64; 4] = [0u64; SIZE];
         let mut tmp_a: [u64; SIZE] = a.0;
         let mut tmp_b: [u64; SIZE] = b.0;
 
@@ -145,48 +152,58 @@ impl Integer255 {
             tmp_b = limbs;
         }
 
-        if shift == 0 {
-            let mut carry: bool;
-            let mut product: u64 = 0;
+        let mut carry: bool;
+        let mut product: u64 = 0;
+        let mut shifted: u64 = 0;
+        let mut remainder: u64 = 0;
 
-            for i in 0..SIZE {
-                let (product, carry) = tmp_a.0[i].overflowing_add(tmp_b.0[i]);
+        for i in 0..SIZE {
+            shifted = tmp_b[i];
+
+            if shift > 0 {
+                shifted = (shifted << shift) | remainder;
+            }
+
+            let (product, carry) = tmp_a[i].overflowing_add(shifted);
                 
-                if !carry {
-                    // If the carry flag wasn't set by the last operation, the
-                    // product is the actual product.
-                    limbs[i] = product;
-                } else {
-                    // Otherwise it overflowed, so we know this product is the
-                    // maximum and we recursively deal with the carry in the
-                    // worst case.
-                    limbs[i] = u64::MAX;
+            if !carry {
+                // If the carry flag wasn't set by the last operation, the
+                // product is the actual product.
+                limbs[i] = product;
+            } else {
+                // Otherwise it overflowed, so we know this product is the
+                // maximum and we recursively deal with the carry in the
+                // worst case.
+                limbs[i] = u64::MAX;
 
-                    let j: usize = i+1;
+                let j: usize = i+1;
 
-                    loop {
-                        let (product, carry) = tmp_a[j].overflowing_add(product);
+                loop {
+                    let (product, carry) = tmp_a[j].overflowing_add(product);
 
-                        if carry {
-                            // If the result can't fit into the last limb we
-                            // simply truncate the overflow.
-                            tmp_a[j] = u64::MAX;
-                        } else {
-                            tmp_a[j] = product;
-                            break;
-                        }
-                        if j < SIZE-1 {
-                            j += 1;
-                        } else {
-                            break;
-                        }
+                    if carry {
+                        // If the result can't fit into the last limb we
+                        // simply truncate the overflow.
+                        tmp_a[j] = u64::MAX;
+                    } else {
+                        tmp_a[j] = product;
+                        break;
+                    }
+                    if j < SIZE-1 {
+                        j += 1;
+                    } else {
+                        break;
                     }
                 }
             }
+            if shift > 0 {
+                remainder = shifted >> (64 - shift);
+            }
         }
+        Integer255(limbs)
     }
 
     pub fn sub_lshift(a: &Integer255, b: &Integer255, shift: usize) -> Integer255 {
-
+        unimplemented!()
     }
 }
