@@ -19,7 +19,8 @@ use crate::errors::InternalError;
 use crate::errors::SignatureError;
 
 /// A 255-bit signed integer, stored as 4 limbs of 64 bits each.
-struct Integer255([u64; 4]);
+#[derive(Debug)]
+pub(crate) struct Integer255([u64; 4]);
 
 impl<'a> TryFrom<&'a [u8]> for Integer255 {
     type Error = SignatureError;
@@ -59,7 +60,8 @@ impl From<Integer255> for [u8; 32] {
 }
 
 /// A 510-bit signed integer, stored as 8 limbs of 64 bits each.
-struct Integer510([u64; 8]);
+#[derive(Debug)]
+pub(crate) struct Integer510([u64; 8]);
 
 impl<'a> TryFrom<&'a [u8]> for Integer510 {
     type Error = SignatureError;
@@ -222,7 +224,7 @@ impl Integer255 {
 }
 
 // XXX figure out a way to macro-ise this
-impl Interger510 {
+impl Integer510 {
     #[inline(always)]
     fn op_lshift<F>(a: &Integer510, b: &Integer510, shift: usize, op: F) -> Integer510
     where
@@ -307,10 +309,89 @@ impl Interger510 {
     }
 }
 
-struct ReductionState {
+#[derive(Debug)] // XXX remove the derive
+pub(crate) struct ReductionState {
     // XXX precompute and hardcode these
     modulus: Integer255,
     modulus_squared: Integer510,
     modulus_length: usize,
     target_length: usize,
+}
+
+const L: [u8; 32] = [
+	0xED, 0xD3, 0xF5, 0x5C, 0x1A, 0x63, 0x12, 0x58,
+	0xD6, 0x9C, 0xF7, 0xA2, 0xDE, 0xF9, 0xDE, 0x14,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10
+];
+
+impl ReductionState {
+    fn new(modulus: &[u8]) -> Result<ReductionState, SignatureError> {
+        let mut mod_len: usize = modulus.len();
+
+        // Check that the modulus is within the supported range.
+        // XXX Switch to only allowing [u8;32], not &[u8]
+        if mod_len > 32 {
+            return Err(SignatureError(InternalError::LatticeReductionError));
+        }
+
+        // Check that the higest bit is unset (we only support 255-bit
+        // integers for the modulus).
+        if mod_len == 32 && modulus[31] >= 0x80 {
+            return Err(SignatureError(InternalError::LatticeReductionError));
+        }
+
+        let ell: Integer255 = Integer255::try_from(modulus)?;
+        let ell_squared: Integer510 = &ell * &ell;
+
+        // XXX k is hardcoded
+
+        // If k = bitlength(n) == 253, then the target bit length is k+1, and
+        // output values are smaller (in absolute value) than sqrt(2^(k+1)).
+        let target_length: usize = (((253 + 2) >> 1) + 8) >> 3;
+
+        Ok(ReductionState {
+            modulus: ell,
+            modulus_squared: ell_squared,
+            modulus_length: 253,
+            target_length: target_length,
+        })
+    }
+}
+
+/// Perform basis reduction: given integer b, this function returns
+/// _signed_ integers c0 and c1 such that:
+///   c0 = c1*b mod n
+///   |c0| < 2^((k+1)/2)
+///   |c1| < 2^((k+1)/2)
+/// where n is the modulus initialized in the provided state, and k is
+/// the bit length of n (i.e. 2^(k-1) < n < 2^k). The source integer b
+/// MUST be between 1 and n-1.
+///
+/// The common size of c0 and c1, in bytes, is returned; that size is
+/// ceil((ceil((k+1)/2)+8)/8), i.e. the smallest size that can contain all
+/// possible c0 and c1 values (given the initialized modulus), including
+/// the sign bit: c0 and c1 are signed integers, they can be negative.
+///
+/// On error, 0 is returned. An error is reported if b is zero or is
+/// not lower than n. There might be other rare error conditions, in
+/// particular if GCD(b,n) != 1.
+/// (It is currently unclear whether the algorithm can ever hit an error
+/// condition when n is prime and 0 < b < n.)
+pub(crate) fn reduce_basis(state: ReductionState, integer: Integer255) -> (Integer255, Integer255) {
+    unimplemented!();
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn reduction_state() {
+        let state: ReductionState = ReductionState::new(&L).unwrap();
+
+        println!("{:?}", state);
+
+        panic!()
+    }
 }
