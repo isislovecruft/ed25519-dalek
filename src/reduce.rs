@@ -9,6 +9,8 @@
 
 //! 2-dimensional lattice basis reduction based on Lagrange's algorithm.
 
+use alloc::vec::Vec;
+
 use core::convert::TryFrom;
 use core::ops::Mul;
 use core::u64;
@@ -100,6 +102,100 @@ impl From<Integer510> for [u8; 64] {
     }
 }
 
+/// Add-with-carry two slices of u64s, a and b, into the sum c.
+fn addcarry_u64s<'a, 'b, 'c>(carry_in: u64, a: &'a [u64], b: &'b [u64], c: &mut [u64]) -> bool {
+    let mut carry: bool = false;
+    let mut product: u64 = 0;
+
+    debug_assert!(a.len() == b.len());
+
+    let mut tmp_a = Vec:: a.clone();
+    let size: usize = a.len();
+
+    for i in 0..size {
+        let (product, carry) = tmp_a[i].overflowing_add(b[i]);
+                
+        if !carry {
+            // If the carry flag wasn't set by the last operation, the
+            // product is the actual product.
+            c[i] = product;
+        } else {
+            // Otherwise it overflowed, so we know this product is the
+            // maximum and we recursively deal with the carry in the
+            // worst case.
+            c[i] = u64::MAX;
+
+            let mut j: usize = i+1;
+
+            loop {
+                let (product, carry) = tmp_a[j].overflowing_add(product);
+
+                if carry {
+                    // If the result can't fit into the last limb we
+                    // simply truncate the overflow.
+                    tmp_a[j] = u64::MAX;
+                } else {
+                    tmp_a[j] = product;
+                    break;
+                }
+                if j < size-1 {
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    carry // true if truncation occurred, false otherwise.
+}
+
+/// Subtract-with-borrow two slices of u64s, a and b, into the difference c.
+fn subborrow_u64s<'a, 'b, 'c>(carry_in: u64, a: &'a [u64], b: &'b [u64], c: &mut [u64]) -> bool {
+    let mut carry: bool = false;
+    let mut difference: u64 = 0;
+
+    debug_assert!(a.len() == b.len());
+
+    let mut tmp_a = a.clone();
+    let size: usize = a.len();
+
+    for i in 0..size {
+        let (difference, carry) = tmp_a[i].overflowing_sub(b[i]);
+                
+        if !carry {
+            // If the carry flag wasn't set by the last operation, the
+            // product is the actual product.
+            c[i] = difference;
+        } else {
+            // Otherwise it underflowed, so we know this difference is the
+            // minimum and we recursively deal with the carry in the
+            // worst case.
+            c[i] = u64::MIN;
+
+            let mut j: usize = i+1;
+
+            loop {
+                let (difference, carry) = tmp_a[j].overflowing_sub(difference);
+
+                if carry {
+                    // If the result can't fit into the last limb we
+                    // simply truncate the overflow.
+                    tmp_a[j] = u64::MIN;
+                } else {
+                    tmp_a[j] = difference;
+                    break;
+                }
+                if j < size-1 {
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    carry // true if truncation occurred, false otherwise.
+}
+
 /// Helper function for widening 64 x 64 => 128 bit multiplication with casting.
 fn m(a: u64, b: u64) -> u128 {
     a as u128 * b as u128
@@ -139,6 +235,10 @@ fn overflowing_sub(a: u64, b: u64) -> (u64, bool) {
 }
 
 impl Integer255 {
+    pub fn zero() -> Integer255 {
+        Integer255([ 0, 0, 0, 0, ])
+    }
+
     #[inline(always)]
     fn op_lshift<F>(a: &Integer255, b: &Integer255, shift: usize, op: F) -> Integer255
     where
@@ -318,16 +418,12 @@ pub(crate) struct ReductionState {
     target_length: usize,
 }
 
-const L: [u8; 32] = [
-	0xED, 0xD3, 0xF5, 0x5C, 0x1A, 0x63, 0x12, 0x58,
-	0xD6, 0x9C, 0xF7, 0xA2, 0xDE, 0xF9, 0xDE, 0x14,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10
-];
-
+// XXX We don't need this code since we only operate over one fixed
+// modulus, but keep it around until we're positive the generated
+// values match.
 impl ReductionState {
     fn new(modulus: &[u8]) -> Result<ReductionState, SignatureError> {
-        let mut mod_len: usize = modulus.len();
+        let mod_len: usize = modulus.len();
 
         // Check that the modulus is within the supported range.
         // XXX Switch to only allowing [u8;32], not &[u8]
@@ -359,6 +455,36 @@ impl ReductionState {
     }
 }
 
+const ELL_BYTES: [u8; 32] = [
+	0xED, 0xD3, 0xF5, 0x5C, 0x1A, 0x63, 0x12, 0x58,
+	0xD6, 0x9C, 0xF7, 0xA2, 0xDE, 0xF9, 0xDE, 0x14,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10
+];
+
+/// ell is the order of the ed25519 basepoint.
+const ELL: Integer255 = Integer255([6346243789798364141,
+                                    1503914060200516822,
+                                    0,
+                                    1152921504606846976]);
+
+/// This is ell * ell.
+const ELL_SQUARED: Integer510 = Integer510([16351996876013341033,
+                                            7494995240958862109,
+                                            4453757063706179006,
+                                            11651825165850652826,
+                                            14628338529006959229,
+                                            187989257525064602,
+                                            0,
+                                            72057594037927936]);
+
+/// If k = bitlength(ell) == 253, then the target bitlength is k+1, and
+/// output values are smaller (in absolute value) than sqrt(2^(k+1)).
+const ELL_BITLENGTH: usize = 253;
+
+/// The size in bytes of a reduced basis.
+const REDUCED_BITLENGTH: usize = 16;
+
 /// Perform basis reduction: given integer b, this function returns
 /// _signed_ integers c0 and c1 such that:
 ///   c0 = c1*b mod n
@@ -378,7 +504,30 @@ impl ReductionState {
 /// particular if GCD(b,n) != 1.
 /// (It is currently unclear whether the algorithm can ever hit an error
 /// condition when n is prime and 0 < b < n.)
-pub(crate) fn reduce_basis(state: ReductionState, integer: Integer255) -> (Integer255, Integer255) {
+pub(crate) fn reduce_basis(state: ReductionState, integer: Integer255)
+    -> Result<(Integer255, Integer255), SignatureError>
+{
+    // Initialisation:
+    //   u = [ell,     0]
+    //   v = [integer, 1]
+    let u0_0 = ELL.0[0];
+    let u0_1 = ELL.0[1];
+    let u0_2 = ELL.0[2];
+    let u0_3 = ELL.0[3];
+
+    let u1_0 = 0u64;
+    let u1_1 = 0u64;
+    let u1_2 = 0u64;
+    let u1_3 = 0u64;
+
+    // Also check that integer < ell.
+    let v0_0 = integer.0[0];
+    let v0_1 = integer.0[1];
+    let v0_2 = integer.0[2];
+    let v0_3 = integer.0[3];
+    
+    //let
+
     unimplemented!();
 }
 
@@ -386,12 +535,40 @@ pub(crate) fn reduce_basis(state: ReductionState, integer: Integer255) -> (Integ
 mod test {
     use super::*;
 
+    const INTEGER255_TWO: [u8; 32] = [ 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+                                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+                                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+                                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, ];
+    const INTEGER255_MAX: [u8; 32] = [ 0x80, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 
+                                       0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 
+                                       0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 
+                                       0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, ];
+
     #[test]
     fn reduction_state() {
-        let state: ReductionState = ReductionState::new(&L).unwrap();
+        let state: ReductionState = ReductionState::new(&ELL_BYTES[..]).unwrap();
 
         println!("{:?}", state);
+    }
 
-        panic!()
+    #[test]
+    fn decode_encode_modulus() {
+        let decoded: Integer255 = Integer255::try_from(&ELL_BYTES[..]).unwrap();
+        let encoded: [u8; 32] = decoded.into();
+
+        assert_eq!(&ELL_BYTES, &encoded);
+    }
+
+    #[test]
+    fn addcarry_u64s_overflow() {
+        let a = Integer255::try_from(&INTEGER255_MAX[..]).unwrap(); // 2^255 - 1 
+        let b = Integer255::try_from(&INTEGER255_TWO[..]).unwrap(); // 2
+        let mut c = Integer255::zero();
+        let mut d = Integer255::zero();
+        let mut r = addcarry_u64s(0, &a.0, &a.0, &mut c.0); // (2^255 - 1)*2
+        let mut s = addcarry_u64s(0, &c.0, &b.0, &mut d.0); // (2^255 - 1)*2 + 2 == (2**256)
+
+        assert!(s); // overflow should have happened and one bit should have been truncated
+        assert!(c.0 == [u64::MAX, u64::MAX, u64::MAX, u64::MAX]);
     }
 }

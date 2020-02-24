@@ -58,7 +58,7 @@ legacy_compatibility = []
 # This feature enables utilising an experimental new variant of Lagrange's 2-dimensional
 # lattice basis reduction algorithm to speed up signature verification (all types of
 # verification, be it single signatures, batched signatures, or aggregated signatures).
-lattice_reduction = ["byteorder"]
+lattice_reduction = ["alloc", "byteorder"]
 u64_backend = ["curve25519-dalek/u64_backend"]
 u32_backend = ["curve25519-dalek/u32_backend"]
 simd_backend = ["curve25519-dalek/simd_backend"]
