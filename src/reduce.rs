@@ -102,18 +102,44 @@ impl From<Integer510> for [u8; 64] {
     }
 }
 
-/// Add-with-carry two slices of u64s, a and b, into the sum c.
-fn addcarry_u64s<'a, 'b, 'c>(carry_in: u64, a: &'a [u64], b: &'b [u64], c: &mut [u64]) -> bool {
-    let mut carry: bool = false;
-    let mut product: u64 = 0;
-
+/// Add-with-carry two slices of u64s, a and b, into the sum c, with an optional shift right.
+#[inline(always)]
+fn addcarry_u64s<'a, 'b>(carry_in: u64, a: &'a [u64], b: &'b [u64], shift: usize) -> (Vec, bool) {
     debug_assert!(a.len() == b.len());
 
-    let mut tmp_a = Vec:: a.clone();
     let size: usize = a.len();
+    let mut shift: usize = shift;
+    let mut tmp_a = Vec::from(a);
+    let mut tmp_b = Vec::from(b);
+    let mut c = Vec::with_capacity(size);
+
+    if shift >= 64 {
+        let k: usize = shift >> 6;
+
+        shift &= 63;
+
+        if k >= size {
+            return Integer255(c);
+        }
+        c[k] = tmp_b[size-k];
+        tmp_b = limbs;
+    }
+
+    // XXX deal with carry_in
+
+    let mut carry: bool = false;
+    let mut product: u64 = 0;
+    let mut shifted: u64 = 0;
+    let mut remainder: u64 = 0;
 
     for i in 0..size {
-        let (product, carry) = tmp_a[i].overflowing_add(b[i]);
+        shifted = tmp_b[i];
+
+        if shift > 0 {
+            shifted = (shifted << shift) | remainder;
+        }
+
+        let (product, carry) = tmp_a[i].overflowing_add(shifted);
                 
         if !carry {
             // If the carry flag wasn't set by the last operation, the
@@ -145,39 +171,68 @@ fn addcarry_u64s<'a, 'b, 'c>(carry_in: u64, a: &'a [u64], b: &'b [u64], c: &mut 
                 }
             }
         }
+        if shift > 0 {
+            remainder = shifted >> (64 - shift);
+        }
     }
-    carry // true if truncation occurred, false otherwise.
+    (c, carry) // true if truncation occurred, false otherwise.
 }
 
-/// Subtract-with-borrow two slices of u64s, a and b, into the difference c.
-fn subborrow_u64s<'a, 'b, 'c>(carry_in: u64, a: &'a [u64], b: &'b [u64], c: &mut [u64]) -> bool {
-    let mut carry: bool = false;
-    let mut difference: u64 = 0;
-
+/// Subtract-with-borrow two slices of u64s, a and b, into the difference c, with an optional shift right.
+#[inline(always)]
+fn subborrow_u64s<'a, 'b>(borrow_in: u64, a: &'a [u64], b: &'b [u64], shifted: usize) -> (Vec, bool) {
     debug_assert!(a.len() == b.len());
 
-    let mut tmp_a = a.clone();
     let size: usize = a.len();
+    let mut shift: usize = shift;
+    let mut tmp_a = Vec::from(a);
+    let mut tmp_b = Vec::from(b);
+    let mut c = Vec::with_capacity(size);
+
+    if shift >= 64 {
+        let k: usize = shift >> 6;
+
+        shift &= 63;
+
+        if k >= size {
+            return Integer255(c);
+        }
+        c[k] = tmp_b[size-k];
+        tmp_b = limbs;
+    }
+
+    let mut borrow: bool = false;
+    let mut difference: u64 = 0;
+    let mut shifted: u64 = 0;
+    let mut remainder: u64 = 0;
+
+    // XXX deal with borrow_in
 
     for i in 0..size {
-        let (difference, carry) = tmp_a[i].overflowing_sub(b[i]);
+        shifted = tmp_b[i];
+
+        if shift > 0 {
+            shifted = (shifted << shift) | remainder;
+        }
+
+        let (difference, borrow) = tmp_a[i].overflowing_sub(shifted);
                 
         if !carry {
             // If the carry flag wasn't set by the last operation, the
-            // product is the actual product.
+            // difference is the actual difference.
             c[i] = difference;
         } else {
             // Otherwise it underflowed, so we know this difference is the
-            // minimum and we recursively deal with the carry in the
+            // minimum and we recursively deal with the borrow in the
             // worst case.
             c[i] = u64::MIN;
 
             let mut j: usize = i+1;
 
             loop {
-                let (difference, carry) = tmp_a[j].overflowing_sub(difference);
+                let (difference, borrow) = tmp_a[j].overflowing_sub(difference);
 
-                if carry {
+                if borrow {
                     // If the result can't fit into the last limb we
                     // simply truncate the overflow.
                     tmp_a[j] = u64::MIN;
@@ -193,10 +248,11 @@ fn subborrow_u64s<'a, 'b, 'c>(carry_in: u64, a: &'a [u64], b: &'b [u64], c: &mut
             }
         }
     }
-    carry // true if truncation occurred, false otherwise.
+    (c, borrow) // true if truncation occurred, false otherwise.
 }
 
 /// Helper function for widening 64 x 64 => 128 bit multiplication with casting.
+#[inline(always)]
 fn m(a: u64, b: u64) -> u128 {
     a as u128 * b as u128
 }
@@ -224,188 +280,47 @@ impl<'a, 'b> Mul<&'b Integer255> for &'a Integer255 {
     }
 }
 
-#[inline(always)]
-fn overflowing_add(a: u64, b: u64) -> (u64, bool) {
-    a.overflowing_add(b)
-}
-
-#[inline(always)]
-fn overflowing_sub(a: u64, b: u64) -> (u64, bool) {
-    a.overflowing_sub(b)
-}
-
 impl Integer255 {
     pub fn zero() -> Integer255 {
         Integer255([ 0, 0, 0, 0, ])
     }
 
-    #[inline(always)]
-    fn op_lshift<F>(a: &Integer255, b: &Integer255, shift: usize, op: F) -> Integer255
-    where
-        F: Fn(u64, u64) -> (u64, bool),
-    {
-        const SIZE: usize = 4;
-
-        let mut shift: usize = shift;
-        let mut limbs: [u64; SIZE] = [0u64; SIZE];
-        let mut tmp_a: [u64; SIZE] = a.0;
-        let mut tmp_b: [u64; SIZE] = b.0;
-
-        if shift >= 64 {
-            let k: usize = shift >> 6;
-            
-            shift &= 63;
-
-            if k >= SIZE {
-                return Integer255(limbs);
-            }
-            limbs[k] = tmp_b[SIZE-k];
-            tmp_b = limbs;
-        }
-
-        let mut carry: bool;
-        let mut product: u64 = 0;
-        let mut shifted: u64 = 0;
-        let mut remainder: u64 = 0;
-
-        for i in 0..SIZE {
-            shifted = tmp_b[i];
-
-            if shift > 0 {
-                shifted = (shifted << shift) | remainder;
-            }
-
-            let (product, carry) = op(tmp_a[i], shifted);
-                
-            if !carry {
-                // If the carry flag wasn't set by the last operation, the
-                // product is the actual product.
-                limbs[i] = product;
-            } else {
-                // Otherwise it overflowed, so we know this product is the
-                // maximum and we recursively deal with the carry in the
-                // worst case.
-                limbs[i] = u64::MAX;
-
-                let mut j: usize = i+1;
-
-                loop {
-                    let (product, carry) = op(tmp_a[j], product);
-
-                    if carry {
-                        // If the result can't fit into the last limb we
-                        // simply truncate the overflow.
-                        tmp_a[j] = u64::MAX;
-                    } else {
-                        tmp_a[j] = product;
-                        break;
-                    }
-                    if j < SIZE-1 {
-                        j += 1;
-                    } else {
-                        break;
-                    }
-                }
-            }
-            if shift > 0 {
-                remainder = shifted >> (64 - shift);
-            }
-        }
-        Integer255(limbs)
-    }
-
     pub fn add_lshift(a: &Integer255, b: &Integer255, shift: usize) -> Integer255 {
-        Integer255::op_lshift(&a, &b, shift, overflowing_add)
+        let carry_in: u64 = 0;
+
+        let (product, carry) = addcarry_u64s(carry_in, &a.0, &b.0, shift);
+
+        Integer255(product)
     }
 
     pub fn sub_lshift(a: &Integer255, b: &Integer255, shift: usize) -> Integer255 {
-        Integer255::op_lshift(&a, &b, shift, overflowing_sub)
+        let borrow_in: u64 = 0;
+
+        let (difference, borrow) = subborrow_u64s(borrow_in, &a.0, &b.0, shift);
+
+        Integer255(difference)
     }
 }
 
-// XXX figure out a way to macro-ise this
 impl Integer510 {
-    #[inline(always)]
-    fn op_lshift<F>(a: &Integer510, b: &Integer510, shift: usize, op: F) -> Integer510
-    where
-        F: Fn(u64, u64) -> (u64, bool),
-    {
-        const SIZE: usize = 8;
-
-        let mut shift: usize = shift;
-        let mut limbs: [u64; SIZE] = [0u64; SIZE];
-        let mut tmp_a: [u64; SIZE] = a.0;
-        let mut tmp_b: [u64; SIZE] = b.0;
-
-        if shift >= 64 { // XXX not sure about this squaring
-            let k: usize = shift >> 6;
-            
-            shift &= 63;
-
-            if k >= SIZE {
-                return Integer510(limbs); // XXX this should be a compile-time error
-            }
-            limbs[k] = tmp_b[SIZE-k];
-            tmp_b = limbs;
-        }
-
-        let mut carry: bool;
-        let mut product: u64 = 0;
-        let mut shifted: u64 = 0;
-        let mut remainder: u64 = 0;
-
-        for i in 0..SIZE {
-            shifted = tmp_b[i];
-
-            if shift > 0 {
-                shifted = (shifted << shift) | remainder;
-            }
-
-            let (product, carry) = op(tmp_a[i], shifted);
-                
-            if !carry {
-                // If the carry flag wasn't set by the last operation, the
-                // product is the actual product.
-                limbs[i] = product;
-            } else {
-                // Otherwise it overflowed, so we know this product is the
-                // maximum and we recursively deal with the carry in the
-                // worst case.
-                limbs[i] = u64::MAX;
-
-                let mut j: usize = i+1;
-
-                loop {
-                    let (product, carry) = op(tmp_a[j], product);
-
-                    if carry {
-                        // If the result can't fit into the last limb we
-                        // simply truncate the overflow.
-                        tmp_a[j] = u64::MAX;
-                    } else {
-                        tmp_a[j] = product;
-                        break;
-                    }
-                    if j < SIZE-1 {
-                        j += 1;
-                    } else {
-                        break;
-                    }
-                }
-            }
-            if shift > 0 {
-                remainder = shifted >> (64 - shift);
-            }
-        }
-        Integer510(limbs)
+    pub fn zero() -> Integer510 {
+        Integer510([ 0, 0, 0, 0, 0, 0, 0, 0])
     }
 
     pub fn add_lshift(a: &Integer510, b: &Integer510, shift: usize) -> Integer510 {
-        Integer510::op_lshift(&a, &b, shift, overflowing_add)
+        let carry_in: u64 = 0;
+
+        let (product, carry) = addcarry_u64s(carry_in, &a.0, &b.0, shift);
+
+        Integer510(product)
     }
 
     pub fn sub_lshift(a: &Integer510, b: &Integer510, shift: usize) -> Integer510 {
-        Integer510::op_lshift(&a, &b, shift, overflowing_sub)
+        let borrow_in: u64 = 0;
+
+        let (difference, borrow) = subborrow_u64s(borrow_in, &a.0, &b.0, shift);
+
+        Integer510(difference)
     }
 }
 
