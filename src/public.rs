@@ -238,7 +238,20 @@ impl PublicKey {
     /// > decodings fail (including S being out of range), the signature is
     /// > invalid.)
     ///
-    /// All `verify_*()` functions within ed25519-dalek perform this check.
+    /// All `verify_*()` functions within ed25519-dalek perform this check,
+    /// under the default features settings.
+    ///
+    /// However, if the `legacy_compatibility` build feature is enabled, this
+    /// check performed on the scalar will be as defined in the original ed25519
+    /// paper, that is that the scalar portion of the signature has the highest
+    /// three bits *unset* (which means that no further checking for the
+    /// remaining `2^253 - 2^252 + 27742317777372353535851937790883648493`
+    /// potential non-reduced scalars is performed).  This
+    /// `legacy_compatibility` feature is to maintain compatibility with
+    /// ed25519-donna, and older versions of libsodium when -DED25519_COMPAT is
+    /// *not* specified.  The `legacy_compatibility` feature is disabled by
+    /// default, and should only be enabled if you're certain you know what
+    /// you're doing and have good reason for not using the stronger checks.
     ///
     /// 2. Point malleability
     ///
