@@ -256,11 +256,15 @@ impl PublicKey {
     /// 2. Point malleability
     ///
     /// The authors of the RFC added in a malleability check to step #3 in
-    /// §5.1.7, for small torsion components in the `R` value of the signature,
-    /// *which is not strictly required*, as they state:
+    /// §5.1.7, for points of small order in the `R` value of the signature and
+    /// the public key `A`, *which is not strictly required*, as they state:
     ///
     /// > Check the group equation \[8\]\[S\]B = \[8\]R + \[8\]\[k\]A'.  It's
     /// > sufficient, but not required, to instead check \[S\]B = R + \[k\]A'.
+    ///
+    /// However, this only ensures that the signature `R` and the public key are
+    /// not points of small order; it does *not* guarantee that the group
+    /// elements are torsion-free.
     ///
     /// # History of Malleability Checks
     ///
